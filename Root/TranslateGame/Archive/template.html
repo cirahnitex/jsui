@@ -1,0 +1,69 @@
+<style>
+    section {
+        margin-left: 20px;
+        position: relative;
+        padding: 5px 0;
+        color:hsl(0,0%,90%);
+    }
+    header {
+        font-size: 16px;
+        display: inline-block;
+        padding: 2px 10px;
+        margin: 5px 0;
+
+    }
+    section.selected header {
+        font-weight: bold;
+        position:relative;
+    }
+    section.selected header:before {
+        content: "_";
+        position: absolute;
+        width:20px;
+        height: 20px;
+        left: -20px;
+        color: transparent;
+        background-image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMTAwIiB3aWR0aD0iMTAwIj4NCgk8cGF0aCBkPSJNIDE1IDM1IEwgNDUgNzAgTCA5MCAxMCIgc3Ryb2tlLXdpZHRoPSIyMCIgc3Ryb2tlPSIjNDc5OGRjIiBmaWxsPSJub25lIiAvPg0KPC9zdmc+DQo=);
+        background-size: contain;
+        background-repeat: no-repeat;
+        margin-left: 5px;
+    }
+    .user {
+        margin-left: 20px;
+        margin-right: 5px;
+        color:hsl(0,0%,70%);
+    }
+    .user:after {
+        content: ":";
+    }
+</style>
+<div>
+    <section>
+        <header>Question</header>
+        <div>
+            <span id="challenger" class="user">yyanaa</span><span id="question">我们完蛋了</span>
+        </div>
+
+    </section>
+
+    <section id="machineBranch">
+        <header>Machine Branch</header>
+        <div>
+            <span class="user">SMT</span><span id="translationM">Screwed</span>
+        </div>
+        <div>
+            <span id="responderM" class="user">stanab</span><span id="responseM"> We are humans</span>
+        </div>
+
+    </section>
+
+    <section id="humanBranch">
+        <header>Human Branch</header>
+        <div>
+            <span id="translator" class="user">smaaa</span><span id="translationH"> We are Screwed</span>
+        </div>
+        <div>
+            <span id="responderH" class="user">stanab</span><span id="responseH"> sure we are</span>
+        </div>
+    </section>
+</div>

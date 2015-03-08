@@ -1,0 +1,60 @@
+<style>
+    .hide {
+        display: none;
+    }
+    #info {
+        position: absolute;
+        right: 10px;
+        top: 0;
+        width:200px;
+        background-color: #444;
+
+    }
+
+    .info-title {
+        border-bottom: 1px solid hsl(207,67%,50%);
+        color:hsl(207,67%,75%);
+        padding: 10px 10px 5px 10px;
+    }
+
+    .pair {
+        padding:5px 0;
+        margin: 0 15px;
+    }
+    .pair:not(:last-child) {
+        border-bottom: 1px solid hsla(0,0%,100%,0.15);
+    }
+    .key {
+        font-size: 16px;
+    }
+    .value {
+        font-size: 12px;
+        opacity: 0.7;
+    }
+</style>
+<div id="info" class="drop-shadow">
+    <div class="info-title">
+        USER
+    </div>
+    <div>
+        <div class="pair">
+            <div class="key">Username</div>
+            <div id="username" class="value">unknown</div>
+        </div>
+        <div class="pair">
+            <div class="key">Score</div>
+            <div id="score" class="value">0</div>
+        </div>
+    </div>
+
+    <div id="gamePlayWrap">
+        <div class="info-title">
+            GAME PLAY
+        </div>
+        <div class="pair">
+            <div class="key">Role</div>
+            <div id="role" class="value">unknown</div>
+        </div>
+    </div>
+
+</div>

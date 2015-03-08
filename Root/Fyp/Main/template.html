@@ -1,0 +1,159 @@
+<style>
+    .audioTabWrap {
+        position: absolute;
+        width: 400px;
+        height: 100%;
+        overflow-y: scroll;
+        overflow-x: hidden;
+        border-right:1px solid hsla(0,0%,100%,0.1);
+    }
+    .rightWrap {
+        margin-left: 400px;
+        height: 100%;
+
+    }
+    .mediaPlayerWrap {
+        height: 50px;
+    }
+    .audioTabWrap .audioTabHeader {
+        margin: 5px 0;
+        border-bottom: 1px solid hsl(207,67%,70%);
+        color: hsl(207, 67%, 80%);
+        padding: 2px 10px;
+    }
+    .audioTabWrap .audioTab {
+        padding: 3px 10px;
+        border: 1px solid transparent;
+        cursor: default;
+    }
+
+    .audioTabWrap .audioTab:hover {
+        border-color: hsla(0,0%,100%,0.15);
+        background-color: hsla(0,0%,100%,0.05);
+    }
+    .audioTabWrap .audioTab.active {
+        background-color: hsla(0,0%,0%,0.2);
+        pointer-events:none;
+        border-left: 3px solid hsl(207, 67%, 50%);
+    }
+    .audioTab #name {
+        color:hsl(0, 0%, 90%);
+    }
+    .audioTab.active #name {
+        color: hsl(207, 67%, 80%);
+        font-weight: bold;
+    }
+    .audioTab #rating {
+        position: absolute;
+        width:100px;
+        height: 100%;
+    }
+    .star {
+        display: inline-block;
+        float: left;
+        background-image:url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0RERERERCIgZD0ibTI1LDIgNiwxN2gxOGwtMTQsMTEgNSwxNy0xNS0xMC0xNSwxMCA1LTE3LTE0LTExaDE4eiIvPg0KPC9zdmc+DQo=);
+
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
+    }
+    .audioTab .star {
+        width:11px;
+        height: 11px;
+    }
+    .star.active {
+        background-image: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9IiMyQTg4RDUiIHN0cm9rZT0iI0RERERERCIgZD0ibTI1LDIgNiwxN2gxOGwtMTQsMTEgNSwxNy0xNS0xMC0xNSwxMCA1LTE3LTE0LTExaDE4eiIvPg0KPC9zdmc+DQo=);
+    }
+    .star.active.predicted {
+        background-image: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9ImhzbCg4Nyw2NyUsNTAlKSIgc3Ryb2tlPSIjREREREREIiBkPSJtMjUsMiA2LDE3aDE4bC0xNCwxMSA1LDE3LTE1LTEwLTE1LDEwIDUtMTctMTQtMTFoMTh6Ii8+DQo8L3N2Zz4NCg==);
+    }
+    .audioTab #url {
+        color:hsl(0, 0%, 60%);
+        margin-left: 60px;
+        font-size: 10px;
+    }
+    .rightWrap #rating {
+        height: 16px;
+    }
+    .rightWrap .star {
+        width:16px;
+        height: 16px;
+        cursor: pointer;
+    }
+    .indent {
+        margin-left: 10px;
+    }
+    section {
+
+        margin: 10px 0;
+        padding: 10px 30px;
+        font-size: 14px;
+        color: hsl(0,0%,80%);
+    }
+    section header {
+        font-size: 18px;
+        transform:translateX(-20px);
+        margin: 5px 0;
+        color:hsl(0,0%,90%);
+    }
+    .ratingValue {
+        margin-left: 3px;
+        color: hsl(207, 67%, 50%);
+    }
+    .ratingValue.predicted {
+        color: hsl(87, 67%, 50%);
+    }
+
+
+</style>
+<div class="fill-height relative">
+    <div id="audioTabWrap" class="audioTabWrap">
+
+    </div>
+    <div class="rightWrap">
+        <div class="indent">
+            <header id="name"></header>
+            <div id="rating">
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star"></div>
+                <div class="star"></div>
+                <span class="ratingValue"></span>
+            </div>
+        </div>
+
+
+        <div id="mediaPlayerWrap" class="mediaPlayerWrap">
+
+        </div>
+        <section>
+            <header>Recommendation</header>
+            <div>Choose an algorithm for recommendation</div>
+            <button id="btnUserBased" class="btn btn-default btn-sm">User-based recommendation</button>
+            <button id="btnItemBased" class="btn btn-default btn-sm">Item-based recommendation</button>
+        </section>
+
+    </div>
+
+</div>
+
+<div class="hide">
+    <header widget="audioTabHeader" class="audioTabHeader"></header>
+    <div widget="audioTab" class="audioTab">
+        <div id="name"></div>
+        <div class="relative">
+            <div id="rating">
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star"></div>
+                <div class="star"></div>
+
+            </div>
+            <div id="url"></div>
+        </div>
+
+    </div>
+</div>
+
