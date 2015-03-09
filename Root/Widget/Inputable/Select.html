@@ -1,0 +1,35 @@
+<style>
+    #optionWrap {
+        display: none;
+    }
+    .wrap.focused #optionWrap {
+        display: block;
+    }
+    #optionWrap {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        border:1px solid hsl(0,0%,40%);
+        background-color: hsla(0,0%,100%,0.05);
+        color:hsl(0,0%,90%);
+        
+
+    }
+    .option {
+        padding: 0 12px;
+    }
+    .option:hover {
+        background-color: hsla(0,0%,100%,0.1);
+        color: hsl(0,0%,100%);
+        cursor: default;
+    }
+</style>
+<div id="wrap" class="wrap relative">
+    <input type="text" id="input" class="form-control">
+    <div id="optionWrap">
+
+    </div>
+</div>
+<div class="hide">
+    <div widget="option" class="option"></div>
+</div>

@@ -19,15 +19,25 @@
             this._childWrap = childWrap;
             dom.appendChild(childWrap);
         }
+
+
+        this.updateChild();
+
+        var that = this;
+        ctrl.bind(Frame.Routable.event.ROUTE_CHANGED,function() {
+            that.updateChild();
+        });
+
     };
     ns.View.extend(Frame.View);
-    ns.View.prototype.update = function(state) {
+    ns.View.prototype.updateChild = function() {
         this._childWrap.innerHTML = "";
-        switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            var view = Frame.createDefaultView(this._ctrl.getRouteChild());
-            this._childWrap.appendChild(view.dom);
-        }
+        var view = Frame.createDefaultView(this._ctrl.getRouteChild());
+        this._childWrap.appendChild(view.dom);
+    };
+
+    ns.View.prototype.update = function(state) {
+
     };
     ns.View.css = {
         '.text':{

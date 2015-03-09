@@ -7,6 +7,14 @@ function Util() {
  * @param {Function} BaseClass
  */
 Util.inherit = function(SubClass, BaseClass) {
+    if(typeof(SubClass) !== 'function') {
+        console.error("Sub Class is not a Function");
+        return;
+    }
+    if(typeof(BaseClass) !== 'function') {
+        console.error("Base Class is not a Function");
+        return;
+    }
     var InheritHelper = function() {
     };
     InheritHelper.prototype = BaseClass.prototype;

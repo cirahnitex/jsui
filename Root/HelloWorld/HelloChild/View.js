@@ -6,7 +6,14 @@
         var dom = this.createElement();
         this.dom = dom;
         {
-            dom.innerHTML = "this is a child";
+            var Select = Root.Widget.Inputable.Select;
+            var select = new Select();
+            select.addOption("Hong Kong");
+            select.addOption("China");
+            select.addOption("Mainland China");
+            select.addOption("Taiwan");
+            var view = select.getDefaultView();
+            dom.appendChild(view.dom);
         }
 
     };
