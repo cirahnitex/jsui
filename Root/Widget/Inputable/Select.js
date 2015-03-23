@@ -1,16 +1,24 @@
 (function() {
     var ns = Root.Widget.Inputable;
-    ns.Select = function() {
-        Root.Widget.Inputable.call(this);
+    /**
+     *
+     * @param {int} [type = Root.Widget.Inputable.Select.type.LOOSE]
+     * @constructor Root.Widget.Inputable.Select
+     * @arguments Root.Widget.Inputable
+     */
+    ns.Select = function(type) {
+        ns.call(this);
         /**
          *
          * @type Root.Widget.Inputable.Select.Option[]
          * @private
          */
         this._aOption = [];
+
+        this._type = type || ns.Select.type.LOOSE;
         this.notifyObservers(ns.Select.state.BLURRED);
     };
-    ns.Select.extend(Root.Widget.Inputable);
+    ns.Select.extend(ns);
     ns.Select.state = {
         FOCUSED:Util.uniqueInt(),
         BLURRED:Util.uniqueInt(),
@@ -73,6 +81,18 @@
     };
     ns.Select.prototype.blur = function() {
         this.notifyObservers(ns.Select.state.BLURRED);
+    };
+    ns.Select.prototype.getType = function() {
+        return this._type;
+    };
+    /**
+     * if type is strict, check whether the value is valid before setting
+     * @param {*} value
+     */
+    ns.Select.prototype.setValue = function(value) {
+        if(this.getType() === ns.Select.type.LOOSE || this.getOption(value)) {
+            ns.prototype.setValue.call(this, value);
+        }
     };
 
 })();
