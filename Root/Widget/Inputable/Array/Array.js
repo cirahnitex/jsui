@@ -65,7 +65,7 @@
      * trigger a PUSH_REQUIRE event
      */
     ns.Array.prototype.pushRequire = function() {
-        this.trigger(ns.event.PUSH_REQUIRE);
+        this.trigger(ns.Array.event.PUSH_REQUIRE);
     };
 
 

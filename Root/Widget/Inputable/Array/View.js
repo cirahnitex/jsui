@@ -3,15 +3,23 @@
     /**
      *
      * @param {Root.Widget.Inputable.Array} ctrl
+     * @param {int} width
      * @constructor Root.Widget.Inputable.Array.View
      * @arguments Frame.TemplateView
      */
-    ns.View = function(ctrl) {
+    ns.View = function(ctrl, width) {
         Frame.TemplateView.call(this, "Root/Widget/Inputable/Array/template.html", ctrl);
+        this.width = width || ns.View.DEFAULT_WIDTH;
         this.applyTemplate();
     };
     ns.View.extend(Frame.TemplateView);
+    ns.View.DEFAULT_WIDTH = 100;
     ns.View.prototype.onload = function() {
+        var ctrl = this._ctrl;
+        this.eles.btnPush.onclick = function() {
+            ctrl.pushRequire();
+        };
+
         this._displayRefresh();
     };
     ns.View.prototype.update = function(state) {
@@ -53,6 +61,7 @@
      */
     ns.View.prototype._appendInputableView = function(view) {
         var itemWrap = this.createWidget(this.eles.listWrap, "itemWrap");
+        itemWrap.style.width = this.width + 'px';
         itemWrap.appendChild(view.dom);
     }
 })();

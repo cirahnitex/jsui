@@ -83,7 +83,14 @@ Frame.main = function() {
  */
 Frame.createDefaultView = function(ctrl) {
     var View = ctrl.constructor.View || Frame.View;
-    var view = new View(ctrl);
+
+    // prepare the args array
+    var args = [window, ctrl];
+    for(var i=0; i<arguments.length; i++) {
+        args.push(arguments[i]);
+    }
+
+    var view = new (Function.prototype.bind.apply(View, args));
     ctrl.addObserver(view);
     return view;
 };

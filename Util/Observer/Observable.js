@@ -72,7 +72,18 @@
      */
     ns.Observable.prototype.getDefaultView = function() {
         if(this._defaultView) return this._defaultView;
-        this._defaultView = Frame.createDefaultView(this);
-        return this._defaultView;
+
+        // prepare the args array
+        var args = [window, this];
+        for(var i=0; i<arguments.length; i++) {
+            args.push(arguments[i]);
+        }
+
+        // get View constructor and apply arguments
+        var View = this.constructor.View || Frame.View;
+        var view = new (Function.prototype.bind.apply(View, args));
+        this._defaultView = view;
+        this.addObserver(view);
+        return view;
     };
 })();

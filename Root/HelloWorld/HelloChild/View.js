@@ -6,14 +6,18 @@
 
         var dom = this.createElement();
         this.dom = dom;
+        var that = this;
         {
             var arrInput = new ArrayInputable();
             for(var i=0; i<5; i++) {
                 var inputable = this._createSelect();
                 arrInput.pushInput(inputable);
             }
-            var view = arrInput.getDefaultView();
+            var view = arrInput.getDefaultView(200);
             dom.appendChild(view.dom);
+            arrInput.bind(ArrayInputable.event.PUSH_REQUIRE, function() {
+                arrInput.pushInput(that._createSelect());
+            });
         }
 
     };
