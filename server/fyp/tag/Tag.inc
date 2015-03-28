@@ -12,6 +12,7 @@ class Tag {
 			$aTag[] = Tag::getTag($tagName);
 		}
 
+
 		// store into audio
 		$audio->sharedTagList = $aTag;
 		R::store($audio);
