@@ -60,6 +60,16 @@ class Api {
 	}
 
 	/**
+	 * @param string $name
+	 * @return array
+	 */
+	public function arrParam($name) {
+		if(!isset($_REQUEST[$name])) $this->response(400);
+		if(!is_array($_REQUEST[$name])) $this->response(400);
+		return $_REQUEST[$name];
+	}
+
+	/**
 	 * @param $name
 	 * @return int
 	 */
