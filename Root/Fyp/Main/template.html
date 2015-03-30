@@ -15,7 +15,7 @@
     .mediaPlayerWrap {
         height: 50px;
     }
-    .audioTabWrap .audioTabHeader {
+    .audioTabHeader {
         margin: 5px 0;
         border-bottom: 1px solid hsl(207,67%,70%);
         color: hsl(207, 67%, 80%);
@@ -103,30 +103,73 @@
     .ratingValue.predicted {
         color: hsl(87, 67%, 50%);
     }
+    .tags {
+        margin-top: 8px;
+        background-color: hsla(0,0%,0%,0.2);
+    }
+    #tagWrap {
+        display: inline-block;
+        margin-right: 5px;
+    }
+    .tagHeader {
+        display: inline;
+        color: hsl(0,0%,20%);
+        background-color: hsl(207, 67%, 50%);
+        padding-left: 10px;
+        font-weight: bold;
+    }
+    .tag {
+        display: inline-block;
+        margin: 0 3px;
+        padding: 0 3px;
+    }
+    .tag:not(:last-of-type)::after {
+        content: " ,";
 
+        font-weight: bold;
+        color:hsl(207, 67%, 70%);
+    }
+    #editorWrap {
+        padding: 5px;
+    }
 
 </style>
 <div class="fill-height relative">
     <div id="audioTabWrap" class="audioTabWrap">
 
     </div>
-    <div class="rightWrap">
-        <div class="indent">
-            <header id="name"></header>
-            <div id="rating">
-                <div class="star active"></div>
-                <div class="star active"></div>
-                <div class="star active"></div>
-                <div class="star"></div>
-                <div class="star"></div>
-                <span class="ratingValue"></span>
+    <div class="rightWrap relative">
+        <div id="noActiveAudio">No Music Selected</div>
+        <div id="activeAudio">
+            <div class="indent">
+                <header id="name"></header>
+                <div id="rating">
+                    <div class="star active predicted"></div>
+                    <div class="star active"></div>
+                    <div class="star active"></div>
+                    <div class="star"></div>
+                    <div class="star"></div>
+                    <span class="ratingValue"></span>
+                </div>
+
+            </div>
+            <div class="tags">
+                <div id="displayWrap">
+                    <div class="tagHeader">Tags</div>
+                    <div class="tagWrap" id="tagWrap">
+
+                    </div>
+                    <a id="btnEditTag" href="javascript:void(0);">Edit</a>
+                </div>
+                <div id="editorWrap"></div>
+            </div>
+
+
+            <div id="mediaPlayerWrap" class="mediaPlayerWrap">
+
             </div>
         </div>
 
-
-        <div id="mediaPlayerWrap" class="mediaPlayerWrap">
-
-        </div>
         <section>
             <header>Recommendation</header>
             <div>Choose an algorithm for recommendation</div>
@@ -155,5 +198,6 @@
         </div>
 
     </div>
+    <div widget="tag" class="tag"></div>
 </div>
 

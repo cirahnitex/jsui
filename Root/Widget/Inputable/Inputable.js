@@ -10,6 +10,9 @@
         this._value = null;
     };
     ns.Inputable.extend(Util.Observable);
+    ns.Inputable.state = {
+        CHANGED:Util.uniqueInt(),
+    };
     ns.Inputable.prototype.getValue = function() {
         return this._value;
     };
@@ -19,5 +22,6 @@
      */
     ns.Inputable.prototype.setValue = function(val) {
         this._value = val;
+        this.notifyObservers(ns.Inputable.state.CHANGED);
     }
 })();

@@ -12,6 +12,8 @@
         this.audios = {};
         this.mediaPlayer = new ns.MediaPlayer();
         this.selectedAudioId = null;
+        this.aActiveAudioTag = [];
+        this.aAllTag = [];
         this.requestAudioList();
 
     };
@@ -29,6 +31,8 @@
         SELECTION_CHANGED:Util.uniqueInt(),
         RATING_CHANGED:Util.uniqueInt(),
         RECOMMENDATION_CHANGED:Util.uniqueInt(),
+        TAG_UPDATED:Util.uniqueInt(),
+        EDITING_TAG:Util.uniqueInt(),
     };
     ns.Main.recommendation = {
         ITEM_BASED:"ItemBased",
@@ -36,7 +40,7 @@
     };
     ns.Main.prototype.requestAudioList = function() {
         var that = this;
-        Api.request("/listAudio.php", function(value, code) {
+        Api.request("/listAudio.php", function(value) {
             that.audios = {};
             for(var i=0; i<value.length; i++) {
                 var audio = value[i];
@@ -45,6 +49,7 @@
             that.notifyObservers(ns.Main.state.REFRESHED);
         });
     };
+
     ns.Main.prototype.requestRateAudio = function(ratingValue) {
         if(this.selectedAudioId === null) return;
         var that = this;
@@ -66,11 +71,35 @@
             that.notifyObservers(ns.Main.state.RECOMMENDATION_CHANGED);
         })
     };
+    /**
+     * get tags of active audio from server
+     */
+    ns.Main.prototype.requestTagUpdate = function() {
+        // get selected audio id
+        var selectedAudioId = this.selectedAudioId;
+        if(!selectedAudioId) return;
+
+        // request tag list from server
+        var that = this;
+        Api.request("/tag/listTag.php",{audioId:selectedAudioId}, function(value) {
+            // if selected audio has changed, do nothing
+            if(selectedAudioId != that.selectedAudioId) return;
+
+            // update aActiveAudioTag
+            that.aActiveAudioTag = value;
+
+            // notify observers
+            that.notifyObservers(ns.Main.state.TAG_UPDATED);
+        });
+
+
+    };
     ns.Main.prototype.selectAudio = function(index) {
         this.selectedAudioId = index;
         var audio = this.audios[index];
         this.mediaPlayer.loadAudio(Api.SERVER + '/' + audio.url);
         this.notifyObservers(ns.Main.state.SELECTION_CHANGED);
+        this.requestTagUpdate();
     };
 
     ns.Main.prototype.getAudioById = function(id) {
@@ -79,6 +108,9 @@
     ns.Main.prototype.getActiveAudio = function() {
         if(this.selectedAudioId === null) return null;
         return this.audios[this.selectedAudioId];
+    };
+    ns.Main.prototype.editTag = function() {
+        this.notifyObservers(ns.Main.state.EDITING_TAG);
     };
 
 })();

@@ -4,7 +4,13 @@
 
     };
     ns.Api.SERVER = "server/fyp";
-
+    /**
+     *
+     * @param {string} path
+     * @param {Object} data
+     * @param {Root.Fyp.Api.request.callback} callback
+     * @param {Function} [onerror]
+     */
     ns.Api.request = function(path, data, callback, onerror) {
         if(path[0] !== "/") path = "/" + path;
         if(typeof(data) === 'function') {
@@ -14,26 +20,47 @@
         }
 
         if(!onerror) onerror = function(){};
-        Util.ajaxPost(ns.Api.SERVER + path, data, function(r) {
+        path = ns.Api.SERVER + path;
+
+        var rtn = new ns.Api.RequestObject(path, data);
+
+        Util.ajaxPost(path, data, function(r) {
             r = ns.Api.returnStrToJson(r);
             if(!r) {
                 console.error("api request failed");
                 onerror(0);
+                rtn.onfinish();
                 return;
             }
             if(!ns.Api.rtnCodeGlobalCheck(r.code)) {
                 onerror(r.code);
+                rtn.onfinish();
                 return;
             }
             callback(r.value, r.code, r.value);
-
+            rtn.onfinish();
         }, function() {
             var Toast = Root.Widget.Toast;
             frame.root.toast("Server unreachable.", Toast.type.ERROR);
             onerror(0);
+            rtn.onfinish();
         });
+        return rtn;
     };
     ns.Api.request.callback = function(value, rtnCode, rtnValue){};
+    ns.Api.waitFor = function(aRequestObject, callback) {
+        var nRequest = aRequestObject.length;
+        var finishedCnt = 0;
+        var requestCallback = function() {
+            finishedCnt++;
+            if(finishedCnt >= nRequest) {
+                callback();
+            }
+        };
+        for(var i=0; i<nRequest; i++) {
+            aRequestObject[i].onfinish = requestCallback;
+        }
+    };
     ns.Api.returnStrToJson = function(str) {
         var rtn;
         if(typeof(str) === 'string') {
@@ -65,4 +92,12 @@
         }
         return true;
     }
+})();
+(function() {
+    var ns = Root.Fyp.Api;
+    ns.RequestObject = function(path, data) {
+        this.path = path;
+        this.data = data;
+        this.onfinish = function() {};
+    };
 })();

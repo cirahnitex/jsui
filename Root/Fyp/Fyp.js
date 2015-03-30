@@ -13,6 +13,9 @@
         this.bindRoute('LearnMore', function() {
             return new ns.Fyp.LearnMore();
         });
+        this.bindRoute('TagEditor', function() {
+            return new ns.Fyp.TagEditor(1);
+        });
         this.bindRoute(/.*/, function() {
             return new ns.Fyp.Welcome();
         })

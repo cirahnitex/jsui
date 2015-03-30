@@ -15,10 +15,6 @@
     ns.View.extend(Frame.TemplateView);
     ns.View.DEFAULT_WIDTH = 100;
     ns.View.prototype.onload = function() {
-        var ctrl = this._ctrl;
-        this.eles.btnPush.onclick = function() {
-            ctrl.pushRequire();
-        };
 
         this._displayRefresh();
     };

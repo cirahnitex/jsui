@@ -22,11 +22,12 @@
          */
         REFRESHED: Util.uniqueInt(),
     };
-    ns.Array.event = {
-        PUSH_REQUIRE: Util.uniqueInt(),
-    };
-    ns.Array.prototype.getValue = function(i) {
-        return this._aInput[i].getValue(i);
+    ns.Array.prototype.getValue = function() {
+        var rtn = [];
+        for(var i=0; i<this._aInput.length; i++) {
+            rtn[i] = this._aInput[i].getValue();
+        }
+        return rtn;
     };
     /**
      *
@@ -60,12 +61,6 @@
     ns.Array.prototype.pushInput = function(input) {
         this._aInput.push(input);
         this.notifyObservers(ns.Array.state.REFRESHED);
-    };
-    /**
-     * trigger a PUSH_REQUIRE event
-     */
-    ns.Array.prototype.pushRequire = function() {
-        this.trigger(ns.Array.event.PUSH_REQUIRE);
     };
 
 

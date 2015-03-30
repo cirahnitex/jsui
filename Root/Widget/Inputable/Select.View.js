@@ -76,6 +76,11 @@
         case ns.state.BLURRED:
             this.eles.wrap.classList.remove('focused');
             break;
+        case Root.Widget.Inputable.state.CHANGED:
+            if(this.eles.input.value === this._ctrl.getValue()) return;
+            //noinspection JSPrimitiveTypeWrapperUsage
+            this.eles.input.value = this._ctrl.getValue();
+            break;
 
         }
     };

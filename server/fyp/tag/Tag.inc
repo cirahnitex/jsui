@@ -6,9 +6,14 @@ class Tag {
 		$audio = R::load("audio", $audioId);
 		if(!$audio) return;
 
+		// remove duplicate tag name
+		$aTagName = array_unique($aTagName);
+
 		// get a list of tag
 		$aTag = [];
 		foreach($aTagName as $tagName) {
+			// skip tag with empty name
+			if(strlen($tagName) <= 0) continue;
 			$aTag[] = Tag::getTag($tagName);
 		}
 
@@ -19,6 +24,14 @@ class Tag {
 
 		// delete redundant tags
 		Tag::deleteRedundantTag();
+	}
+	static function listAllTagName() {
+		$aTag = R::findAll('tag');
+		$rtn = [];
+		foreach($aTag as $tag) {
+			$rtn[] = $tag['name'];
+		}
+		return $rtn;
 	}
 	static function listTagName($audioId) {
 		$audio = R::load('audio', $audioId);

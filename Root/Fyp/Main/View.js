@@ -34,11 +34,15 @@
         this.eles.btnUserBased.onclick = function() {
             ctrl.requestRecommend(ns.recommendation.USER_BASED);
         };
-
+        this.eles.btnEditTag.onclick = function() {
+            ctrl.editTag();
+        };
 
     };
     ns.View.prototype.update = function(state) {
         if(this.isTemplateLoading) return;
+
+        this._displayHasActiveAudio(this._ctrl.selectedAudioId);
 
         switch(state) {
         case ns.state.REFRESHED:
@@ -52,6 +56,22 @@
         case ns.state.RECOMMENDATION_CHANGED:
             this._displayRefreshRatings();
             break;
+        case ns.state.TAG_UPDATED:
+            this._displayTag();
+            break;
+        case ns.state.EDITING_TAG:
+            this._displayEditTag();
+            break;
+        }
+    };
+    ns.View.prototype._displayHasActiveAudio = function(has) {
+        if(has) {
+            this.eles.activeAudio.classList.remove('hide');
+            this.eles.noActiveAudio.classList.add('hide');
+        }
+        else {
+            this.eles.activeAudio.classList.add('hide');
+            this.eles.noActiveAudio.classList.remove('hide');
         }
     };
     ns.View.prototype._displayAudios = function() {
@@ -143,6 +163,7 @@
         // right content
         this.eles.name.html(audio.name);
         this._displayRating(this.eles.rating, audio);
+
     };
     ns.View.prototype._displayRefreshRatings = function() {
         var aWidget = this.querySelectorAll('.audioTab');
@@ -153,7 +174,46 @@
             this._displayRating(widget, audio);
         }
         if(this._ctrl.getActiveAudio()) this._displayRating(this.eles.rating, this._ctrl.getActiveAudio());
-    }
+    };
+    ns.View.prototype._displayTag = function() {
+        var aTag = this._ctrl.aActiveAudioTag;
+        this.eles.displayWrap.classList.remove('hide');
+        this.eles.editorWrap.classList.add('hide');
+        this.eles.tagWrap.innerHTML = '';
+        for(var i=0; i<aTag.length; i++) {
+            this.createWidget(this.eles.tagWrap, 'tag', aTag[i]);
+
+        }
+    };
+    ns.View.prototype._displayEditTag = function() {
+        if(!this._ctrl.selectedAudioId) return;
+        this.eles.displayWrap.classList.add('hide');
+        this.eles.editorWrap.classList.remove('hide');
+
+        // create a TagEditor
+        var TagEditor = Root.Fyp.TagEditor;
+
+        // append its view into editorWrap
+        var editor = new TagEditor(this._ctrl.selectedAudioId);
+        var eEditorWrap = this.eles.editorWrap;
+        eEditorWrap.innerHTML = '';
+        eEditorWrap.appendChild(editor.getDefaultView().dom);
+
+        // add events
+        var that = this;
+        var ctrl = this._ctrl;
+
+        // update tags on EDIT_SUCCESS
+        editor.bind(TagEditor.event.EDIT_SUCCESS, function() {
+            ctrl.requestTagUpdate();
+        });
+
+        // display tags on this view only on DONE
+        editor.bind(TagEditor.event.DONE, function() {
+            that._displayTag();
+        });
+    };
+
 
 
 })();

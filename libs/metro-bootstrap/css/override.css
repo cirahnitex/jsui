@@ -166,21 +166,16 @@ label {
 .hide {
   display: none;
 }
-
-::-webkit-scrollbar {
-  background-color: transparent;
-  width: 8px;
+a {
+  color: hsl(207,67%, 50%);
 }
-
-/* Track */
-::-webkit-scrollbar-track {
-  background-color: transparent;
-
+a:hover {
+  text-decoration: underline;
+  color: hsl(207, 67%, 50%);
 }
-
-/* Handle */
-::-webkit-scrollbar-thumb {
-
-  background: rgba(255,255,255,0.3);
-
+a:visited {
+  color: hsl(207, 67%, 50%);
+}
+a:focus {
+  color: hsl(207, 67%, 50%);
 }
