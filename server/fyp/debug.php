@@ -1,7 +1,7 @@
 <?php
 require_once('global.inc');
+require_once('Recommendation/ItemBased.inc');
+use Recommendation\ItemBased;
 
-
-$audio = R::load("audio",1);
-$tag = $audio->sharedTagList[1];
-var_dump($tag->name);
+$algm = new ItemBased();
+$algm->predictRating(7,27);

@@ -2,12 +2,13 @@
 require_once "global.inc";
 require_once "Recommendation/ItemBased.inc";
 require_once "Recommendation/UserBased.inc";
+require_once "Recommendation/TagBased.inc";
 use Recommendation\ItemBased;
 use Recommendation\UserBased;
+use Recommendation\TagBased;
 $api = new Api();
 $uid = $api->getActiveUserId();
 $algmStr = $api->strParam("algorithm");
-$user = R::load("user", $uid);
 
 switch($algmStr) {
 	case 'ItemBased':
@@ -15,6 +16,9 @@ switch($algmStr) {
 		break;
 	case 'UserBased':
 		$algm = new UserBased();
+		break;
+	case 'TagBased':
+		$algm = new TagBased();
 		break;
 	default:
 		$api->response(400);

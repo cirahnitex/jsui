@@ -117,6 +117,14 @@ function Util() {
  * @param {Function} BaseClass
  */
 Util.inherit = function(SubClass, BaseClass) {
+    if(typeof(SubClass) !== 'function') {
+        console.error("Sub Class is not a Function");
+        return;
+    }
+    if(typeof(BaseClass) !== 'function') {
+        console.error("Base Class is not a Function");
+        return;
+    }
     var InheritHelper = function() {
     };
     InheritHelper.prototype = BaseClass.prototype;
@@ -615,8 +623,19 @@ Util.Set.prototype.to_array = function() {
      */
     ns.Observable.prototype.getDefaultView = function() {
         if(this._defaultView) return this._defaultView;
-        this._defaultView = Frame.createDefaultView(this);
-        return this._defaultView;
+
+        // prepare the args array
+        var args = [window, this];
+        for(var i=0; i<arguments.length; i++) {
+            args.push(arguments[i]);
+        }
+
+        // get View constructor and apply arguments
+        var View = this.constructor.View || Frame.View;
+        var view = new (Function.prototype.bind.apply(View, args));
+        this._defaultView = view;
+        this.addObserver(view);
+        return view;
     };
 })();
 
@@ -693,10 +712,10 @@ Frame.main = function() {
         Frame.TemplateView.releasePreloadTemplate();
         window.frame = new Frame();
         frame.root = new Root();
-        var view = Frame.createDefaultView(frame.root);
 
-        document.body.appendChild(view.dom);
         frame.setLocation(new Frame.SiteLocation(document.location.hash));
+        var view = Frame.createDefaultView(frame.root);
+        document.body.appendChild(view.dom);
     });
     window.onhashchange = function() {
         if(!frame._hashListenerEnabled) return;
@@ -721,7 +740,14 @@ Frame.main = function() {
  */
 Frame.createDefaultView = function(ctrl) {
     var View = ctrl.constructor.View || Frame.View;
-    var view = new View(ctrl);
+
+    // prepare the args array
+    var args = [window, ctrl];
+    for(var i=0; i<arguments.length; i++) {
+        args.push(arguments[i]);
+    }
+
+    var view = new (Function.prototype.bind.apply(View, args));
     ctrl.addObserver(view);
     return view;
 };
@@ -746,7 +772,7 @@ Frame.main();
     };
     Util.inherit(ns.Routable, Util.Observable);
 
-    ns.Routable.state = {
+    ns.Routable.event = {
         ROUTE_CHANGED: Util.uniqueInt(),
     };
 
@@ -841,14 +867,14 @@ Frame.main();
             if(child instanceof Frame.Routable) {
                 child.setLocation(siteLocation);
             }
-            this.notifyObservers(ns.Routable.state.ROUTE_CHANGED);
+            this.trigger(ns.Routable.event.ROUTE_CHANGED);
         }
         else if(child === Frame.Routable.ROUTE_ABORT) {
 
         }
         else {
             this._child = null;
-            this.notifyObservers(ns.Routable.state.ROUTE_CHANGED);
+            this.trigger(ns.Routable.event.ROUTE_CHANGED);
             window.frame.updateLocation();
         }
 
@@ -1029,6 +1055,17 @@ Frame.main();
 
         this._ctrl = observable;
 
+        if(observable instanceof Frame.Routable) {
+            var that = this;
+            observable.bind(Frame.Routable.event.ROUTE_CHANGED, function() {
+                that.onRouteChange(observable.getRouteChild());
+            });
+            setTimeout(function() {
+                that.onRouteChange(observable.getRouteChild());
+            },10);
+
+        }
+
     };
     Util.inherit(ns.View, Util.Observer);
     /**
@@ -1142,19 +1179,14 @@ Frame.main();
         document.getElementsByTagName('head')[0].appendChild(styleElem);
         this.constructor.isCssApplied = true;
     };
-    ns.View.prototype.update = function(state) {
-
+    ns.View.prototype.update = function(state){};
+    ns.View.prototype.onRouteChange = function(routeChild) {
         if(this.constructor !== ns.View) return; // don't apply this update function when in subclass
 
         this.dom.innerHTML = '';
+        var view = Frame.createDefaultView(routeChild);
+        this.dom.appendChild(view.dom);
 
-        switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            var view = Frame.createDefaultView(this._ctrl.getRouteChild());
-            this.dom.appendChild(view.dom);
-
-
-        }
     };
     /**
      * create a view of a controller. does not create the view of the same controller twice.
@@ -1190,9 +1222,15 @@ Frame.main();
 
         /**
          * exported elements is stored here
-         * @type {Object}
+         * @type {HTMLElement[]}
          */
         this.eles = {};
+
+        /**
+         * exported widgets is stored here
+         * @type {HTMLElement[]}
+         */
+        this._widgets = {};
         this.isTemplateLoading = true;
 
         this._templatePath = templatePath;
@@ -1202,6 +1240,7 @@ Frame.main();
     ns.TemplateView.extend(Frame.View);
     ns.TemplateView._TEMPLATE_KEY = Util.uniqueName();
     ns.TemplateView.SYMBOL_ATTRIBUTE_NAME = "id";
+    ns.TemplateView.WIDGET_ATTRIBUTE_NAME = "widget";
     /**
      * hold templates in release version
      */
@@ -1226,6 +1265,36 @@ Frame.main();
         });
     };
     /**
+     * get a clone of the required widget
+     * export symbols inside this widget
+     * nested widget is not allowed
+     * @param {HTMLElement} [parent = null]
+     * @param {string} name
+     * @param {string} [innerHTML = '']
+     * @returns {HTMLElement}
+     */
+    ns.TemplateView.prototype.createWidget = function(parent, name, innerHTML) {
+        if(typeof(parent) === 'string') {
+            innerHTML = name;
+            name = parent;
+            parent = null;
+        }
+        var rtn = this._widgets[name].cloneNode(true);
+        this._exportSymbolRec(rtn, rtn);
+        if(parent instanceof HTMLElement) {
+            parent.appendChild(rtn);
+        }
+        if(typeof(innerHTML) === 'string') {
+            if(rtn.tagName.toLowerCase() === 'input') {
+                rtn.value = innerHTML;
+            }
+            else {
+                rtn.html(innerHTML);
+            }
+        }
+        return rtn;
+    };
+    /**
      * gets a HTMLElement from the template
      * if template has already been loaded, return a copy of it
      * otherwise load it
@@ -1237,7 +1306,7 @@ Frame.main();
         if(this.constructor.hasOwnProperty(ns.TemplateView._TEMPLATE_KEY))
         {
             var dom = this.constructor[ns.TemplateView._TEMPLATE_KEY].cloneNode(true);
-            this._exportSymbolRec(dom);
+            this._exportSymbolRec(this, dom);
             this.dom.appendChild(dom);
             callback();
         }
@@ -1250,7 +1319,8 @@ Frame.main();
     };
 
     /**
-     * load the template
+     * load the template.
+     * either by ajax request(debug mode), or by in-memory storage(release mode)
      * @param {Function} callback
      * @private
      */
@@ -1275,27 +1345,44 @@ Frame.main();
 
     };
     /**
-     * exports all the symbols to this.eles, including itself.
+     * exports all the symbols to namespace.eles, excluding itself.
+     * if dom is a widget, stop exporting symbols, and remove it from DOM tree
+     * @param {Object} namespace
      * @param {HTMLElement} dom
      * @private
      */
-    ns.TemplateView.prototype._exportSymbolRec = function(dom) {
-        var symbolName = dom.getAttribute(ns.TemplateView.SYMBOL_ATTRIBUTE_NAME);
-        if(symbolName) {
-            if(!this.eles.hasOwnProperty(symbolName)) {
-                this.eles[symbolName] = dom;
-            }
-            else if(this.eles[symbolName] instanceof Array) {
-                this.eles[symbolName].push(dom);
-            }
-            else {
-                this.eles[symbolName] = [this.eles[symbolName], dom];
-            }
-        }
+    ns.TemplateView.prototype._exportSymbolRec = function(namespace, dom) {
         var aChild = dom.children;
         for(var i=0; i<aChild.length; i++) {
-            this._exportSymbolRec(aChild[i]);
+            dom = aChild[i];
+            var widgetName = dom.getAttribute(ns.TemplateView.WIDGET_ATTRIBUTE_NAME);
+            if(widgetName) {
+                namespace._widgets[widgetName] = dom;
+                if(dom.parentNode) {
+                    dom.parentNode.removeChild(dom);
+                    i--;
+                }
+                continue;
+            }
+
+            var symbolName = dom.getAttribute(ns.TemplateView.SYMBOL_ATTRIBUTE_NAME);
+            if(symbolName) {
+                if(!namespace.hasOwnProperty('eles')) namespace.eles = {};
+                if(!namespace.eles.hasOwnProperty(symbolName)) {
+                    namespace.eles[symbolName] = dom;
+                }
+                else if(this.eles[symbolName] instanceof Array) {
+                    namespace.eles[symbolName].push(dom);
+                }
+                else {
+                    namespace.eles[symbolName] = [namespace.eles[symbolName], dom];
+                }
+            }
+
+            this._exportSymbolRec(namespace, dom);
         }
+
+
     };
     /**
      * return and remove the first <style> element in an HTMLElement
@@ -1332,6 +1419,7 @@ Frame.main();
 })();
 
 (function() {
+
     var ns = window;
     ns.Root = function() {
         Frame.Routable.call(this);
@@ -1342,8 +1430,8 @@ Frame.main();
             return new Root.HelloWorld();
         });
 
-        this.bindRoute("Fyp", function() {
-            return new Root.Fyp();
+        this.bindRoute("COMP2021", function() {
+            return new Root.COMP2021();
         });
         this.bindRoute("Widget", function() {
             return new Root.Widget();
@@ -1355,7 +1443,7 @@ Frame.main();
             return new Root.TranslateGame();
         });
         this.bindRoute(/.*/, function() {
-            return new Root.TranslateGame();
+            return new Root.COMP2021();
         });
 
     };
@@ -1388,16 +1476,11 @@ Frame.main();
         }
     };
     ns.View.extend(Frame.View);
-    ns.View.prototype.update = function(state) {
-
+    ns.View.prototype.onRouteChange = function(routeChild) {
         this._childWrap.innerHTML = '';
 
-        switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            var view = Frame.createDefaultView(this._ctrl.getRouteChild());
-            this._childWrap.appendChild(view.dom);
-
-        }
+        var view = Frame.createDefaultView(this._ctrl.getRouteChild());
+        this._childWrap.appendChild(view.dom);
     }
 
 })();
@@ -1889,80 +1972,540 @@ Frame.main();
 })();
 
 (function() {
-    var ns = Root;
-    ns.HelloWorld = function() {
-        Frame.Routable.call(this);
-
-        this.bindRoute(/.*/,function() {
-            return new ns.HelloWorld.HelloChild();
-        });
+    var ns = Root.Widget;
+    /**
+     * a widget that is capable of holding a value
+     * @constructor Root.Widget.Inputable
+     * @arguments Root.Widget.Observable
+     */
+    ns.Inputable = function() {
+        Util.Observable.call(this);
+        this._value = null;
     };
-    ns.HelloWorld.extend(Frame.Routable);
+    ns.Inputable.extend(Util.Observable);
+    ns.Inputable.state = {
+        CHANGED:Util.uniqueInt(),
+    };
+    ns.Inputable.prototype.getValue = function() {
+        return this._value;
+    };
+    /**
+     * set the value
+     * @param {*} val
+     */
+    ns.Inputable.prototype.setValue = function(val) {
+        this._value = val;
+        this.notifyObservers(ns.Inputable.state.CHANGED);
+    }
 })();
 
 (function() {
-    var ns = Root.HelloWorld;
+    var ns = Root.Widget.Inputable;
+    /**
+     * a text input for controller Inputable
+     * @param {Root.Widget.Inputable} ctrl
+     * @constructor Root.Widget.Inputable.View
+     * @arguments Frame.View
+     */
     ns.View = function(ctrl) {
-        Frame.View.call(this,ctrl);
-
-        this._text = null;
-        this._childWrap = null;
-        var dom = this.createElement();
-        this.dom = dom;
-        {
-            var text = this.createElement('.text');
-            this._text = text;
-            dom.appendChild(text);
-            {
-                text.innerHTML = "hello world";
-            }
-
-            var childWrap = this.createElement();
-            this._childWrap = childWrap;
-            dom.appendChild(childWrap);
-        }
+        Frame.View.call(this, ctrl);
+        this.dom = this.createElement('input[type=text]');
+        this.dom.addEventListener('change', function() {
+            ctrl.setValue(this.value);
+        });
     };
     ns.View.extend(Frame.View);
     ns.View.prototype.update = function(state) {
-        this._childWrap.innerHTML = "";
         switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            var view = Frame.createDefaultView(this._ctrl.getRouteChild());
-            this._childWrap.appendChild(view.dom);
-        }
-    };
-    ns.View.css = {
-        '.text':{
-            'color':'hsl(180, 50%, 50%)',
-
+        case ns.state.CHANGED:
+            if(this.dom.value === this._ctrl.getValue()) return;
+            this.dom.value = this._ctrl.getValue();
+            break;
         }
     }
 })();
 
 (function() {
-    var ns = Root.HelloWorld;
-    ns.HelloChild = function() {
-        Frame.Routable.call(this);
-        this.routeKey = "HelloChild";
+    var ns = Root.Widget.Inputable;
+    /**
+     *
+     * @param {int} [type = Root.Widget.Inputable.Select.type.LOOSE]
+     * @constructor Root.Widget.Inputable.Select
+     * @arguments Root.Widget.Inputable
+     */
+    ns.Select = function(type) {
+        ns.call(this);
+        /**
+         *
+         * @type Root.Widget.Inputable.Select.Option[]
+         * @private
+         */
+        this._aOption = [];
+
+        this._type = type || ns.Select.type.LOOSE;
+        this.notifyObservers(ns.Select.state.BLURRED);
     };
-    ns.HelloChild.extend(Frame.Routable);
+    ns.Select.extend(ns);
+    ns.Select.state = {
+        FOCUSED:Util.uniqueInt(),
+        BLURRED:Util.uniqueInt(),
+    };
+    ns.Select.type = {
+        STRICT:Util.uniqueInt(),
+        LOOSE:Util.uniqueInt(),
+    };
+
+    /**
+     *
+     * @param {string} value
+     * @param {string} [display=null]
+     */
+    ns.Select.prototype.addOption = function(value, display) {
+        var option = this.getOption(value);
+        if(option) {
+            option.setDisplay(display);
+            return;
+        }
+        var option = new ns.Select.Option(value, display);
+        this._aOption.push(option);
+    };
+    /**
+     *
+     * @param {string} value
+     * @returns {Root.Widget.Inputable.Select.Option}
+     */
+    ns.Select.prototype.getOption = function(value) {
+        for(var i=0; i<this._aOption.length; i++) {
+            var option = this._aOption[i];
+            if(option.value === value) {
+                return option;
+            }
+        }
+        return null;
+    };
+    /**
+     *
+     * @param {string} query
+     * @returns Root.Widget.Inputable.Select.Option[];
+     */
+    ns.Select.prototype.searchOption = function(query) {
+        if(!query) return this._aOption;
+        query = query.toLowerCase();
+        var rtn = [];
+        for(var i=0; i<this._aOption.length; i++) {
+            var option = this._aOption[i];
+            if(option.getDisplay().toLowerCase().indexOf(query) >= 0) {
+                rtn.push(option);
+            }
+        }
+        return rtn;
+    };
+    ns.Select.prototype.listOption = function() {
+        return this._aOption;
+    };
+    ns.Select.prototype.focus = function() {
+        this.notifyObservers(ns.Select.state.FOCUSED);
+    };
+    ns.Select.prototype.blur = function() {
+        this.notifyObservers(ns.Select.state.BLURRED);
+    };
+    ns.Select.prototype.getType = function() {
+        return this._type;
+    };
+    /**
+     * if type is strict, check whether the value is valid before setting
+     * @param {*} value
+     */
+    ns.Select.prototype.setValue = function(value) {
+        if(this.getType() === ns.Select.type.LOOSE || this.getOption(value)) {
+            ns.prototype.setValue.call(this, value);
+        }
+    };
+
+})();
+(function() {
+    var ns = Root.Widget.Inputable.Select;
+    /**
+     *
+     * @param {string} value
+     * @param {string} [display]
+     * @constructor Root.Widget.Inputable.Select.Option
+     */
+    ns.Option = function(value, display) {
+        this.value = value;
+        if(typeof(display) === 'undefined') display = null;
+        this._display = display;
+
+    };
+    /**
+     * get a string to display. if not set, returns the value
+     * @returns {string}
+     */
+    ns.Option.prototype.getDisplay = function() {
+        if(this._display != null) {
+            return this._display;
+        }
+        else {
+            return this.value;
+        }
+    };
+    ns.Option.prototype.setDisplay = function(display) {
+        this._display = display;
+    };
+
 })();
 
 (function() {
-    var ns = Root.HelloWorld.HelloChild;
+    var ns = Root.Widget.Inputable.Select;
     ns.View = function(ctrl) {
-        Frame.View.call(this, ctrl);
+        Frame.TemplateView.call(this, "Root/Widget/Inputable/Select.html", ctrl);
+        this.applyTemplate();
+    };
+    ns.View.extend(Frame.TemplateView);
+    ns.View.OPTION_DOM_OPTION_VARNAME = Util.uniqueName();
+    ns.View.prototype.onload = function() {
+        var that = this;
+        var ctrl = this._ctrl;
 
-        var dom = this.createElement();
-        this.dom = dom;
-        {
-            dom.innerHTML = "this is a child";
+        // focus this widget when the input dom is focused
+        this.eles.input.addEventListener('focus', function() {
+            that._ctrl.focus();
+        });
+
+        // commit the value and blur the widget when the input dom is blurred, with a short delay.
+        // because we need a short amount of time to click the option.
+        this.eles.input.addEventListener('blur', function() {
+            that._commitValue();
+            setTimeout(function() {
+                that._ctrl.blur();
+            }, 100);
+        });
+
+        // give some hint when typing into the input
+        this.eles.input.addEventListener('keyup', function(e) {
+            switch(e.which) {
+            case 38:
+                that._hoverPreviousOption();
+                break;
+            case 40:
+                that._hoverNextOption();
+                break;
+            case 13:
+                that._selectHoveredOption();
+                break;
+            }
+            var searchResult = ctrl.searchOption(this.value);
+            that._displaySearchedOptions(searchResult);
+            that._hoverFirstOption();
+        });
+
+        // list all options
+        var aOption = this._ctrl.listOption();
+        var _option = ns.View.OPTION_DOM_OPTION_VARNAME;
+
+        // for each option
+        for(var i=0; i<aOption.length; i++) {
+            var option = aOption[i];
+
+            // create a dom to display the option
+            var optionDom = this.createWidget(this.eles.optionWrap,'option',option.getDisplay());
+            optionDom[_option] = option;
+
+            // mouseover the dom to hover
+            optionDom.onmouseover = function() {
+                that._hoverOption(this);
+            };
+
+            // click the dom to select the option
+            optionDom.onmousedown = function() {
+                that._selectHoveredOption();
+            };
         }
+    };
+
+    ns.View.prototype.update = function(state) {
+        if(this.isTemplateLoading)return;
+        switch(state) {
+        case ns.state.FOCUSED:
+            this.eles.wrap.classList.add('focused');
+            this._hoverFirstOption();
+            break;
+        case ns.state.BLURRED:
+            this.eles.wrap.classList.remove('focused');
+            break;
+        case Root.Widget.Inputable.state.CHANGED:
+            if(this.eles.input.value === this._ctrl.getValue()) return;
+            //noinspection JSPrimitiveTypeWrapperUsage
+            this.eles.input.value = this._ctrl.getValue();
+            break;
+
+        }
+    };
+    /**
+     * display searched result
+     * @param {Root.Widget.Inputable.Select.Option[]} aSearchedOption
+     * @private
+     */
+    ns.View.prototype._displaySearchedOptions = function(aSearchedOption) {
+
+        // select all option dom
+        var aDom = this.querySelectorAll('.option');
+
+        // for each option dom
+        for(var i=0; i<aDom.length; i++) {
+            var dom = aDom[i];
+
+            // check whether it is in search result
+            var option = dom[ns.View.OPTION_DOM_OPTION_VARNAME];
+            if(aSearchedOption.indexOf(option) >= 0) {
+
+                // if true, un-hide
+                dom.classList.remove('hide');
+            }
+            else {
+
+                // else, hide
+                dom.classList.add('hide');
+            }
+        }
+    };
+    /**
+     * add .hover to an option and remove .hover to all others
+     * @param {HTMLElement} optionDom
+     * @private
+     */
+    ns.View.prototype._hoverOption = function(optionDom) {
+        // select all option dom
+        var aDom = this.querySelectorAll('.option');
+
+        // for each option dom
+        for(var i=0; i<aDom.length; i++) {
+            var dom = aDom[i];
+
+            // remove .hover
+            dom.classList.remove('hover');
+
+            // if it is what should be hovered, add .hover
+            if(dom === optionDom) {
+                dom.classList.add('hover');
+            }
+        }
+    };
+    ns.View.prototype._hoverFirstOption = function() {
+        this._hoverOption(this.querySelector('.option:not(.hide)'));
+    };
+    /**
+     * hover previous option
+     * @private
+     */
+    ns.View.prototype._hoverPreviousOption = function() {
+        // select the hovered option
+        var dom = this.querySelector('.option.hover');
+
+        // if exists, hover its previous sibling
+        if(dom) {
+            var sib = dom.previousSibling;
+
+            // if its an element, hover it
+            if(sib instanceof HTMLElement) this._hoverOption(sib);
+            return;
+        }
+        // if not, hover the first option
+        var dom = this.querySelector('.option');
+        this._hoverOption(dom);
+    };
+    /**
+     *
+     * @private
+     */
+    ns.View.prototype._hoverNextOption = function() {
+        // select the hovered option
+        var dom = this.querySelector('.option.hover');
+
+        // if exists, hover its next sibling
+        if(dom) {
+            var sib = dom.nextSibling;
+
+            // if its an element, hover it
+            if(sib instanceof HTMLElement) this._hoverOption(sib);
+            return;
+        }
+        // if not, hover the first option
+        var dom = this.querySelector('.option');
+        this._hoverOption(dom);
 
     };
-    Util.inherit(ns.View, Frame.View);
-    ns.View.prototype.update = function(state) {
+    ns.View.prototype._selectHoveredOption = function() {
+        // select the hovered option
+        var option = this.querySelector('.option.hover');
 
+        // do nothing if no option is hovered
+        if(!option) return;
+
+        // get its display string
+        option = option[ns.View.OPTION_DOM_OPTION_VARNAME];
+        // fill into the input
+        //noinspection JSPrimitiveTypeWrapperUsage
+        this.eles.input.value = option.getDisplay();
+
+        // commit value
+        this._ctrl.setValue(option.value);
+
+    };
+    ns.View.prototype._commitValue = function() {
+        // get content in input
+        var display = this.eles.input.value;
+
+        // list all options
+        var aOption = this._ctrl.listOption();
+
+        for(var i=0; i<aOption.length; i++) {
+            var option = aOption[i];
+
+            // find the option that match the input content
+            // commit that value
+            if(option.getDisplay() === display) {
+                this._ctrl.setValue(option.value);
+                return;
+            }
+
+        }
+
+        // commit the content if no matching option found
+        this._ctrl.setValue(display);
+
+    };
+})();
+
+(function() {
+    var ns = Root.Widget.Inputable;
+    /**
+     *
+     * @constructor Root.Widget.Inputable.Array
+     * @arguments Root.Widget.Inputable
+     */
+    ns.Array = function() {
+        ns.call(this);
+        /**
+         *
+         * @type {Root.Widget.Inputable[]}
+         * @private
+         */
+        this._aInput = [];
+        this.notifyObservers(ns.Array.state.REFRESHED);
+    };
+    ns.Array.extend(ns);
+    ns.Array.state = {
+        /**
+         * @event the array of input has changed.
+         */
+        REFRESHED: Util.uniqueInt(),
+    };
+    ns.Array.prototype.getValue = function() {
+        var rtn = [];
+        for(var i=0; i<this._aInput.length; i++) {
+            rtn[i] = this._aInput[i].getValue();
+        }
+        return rtn;
+    };
+    /**
+     *
+     * @param {int} i
+     * @returns {Root.Widget.Inputable}
+     */
+    ns.Array.prototype.getInput = function(i) {
+        return this._aInput[i];
+    };
+    /**
+     *
+     * @returns {Root.Widget.Inputable[]}
+     */
+    ns.Array.prototype.listInput = function() {
+        return this._aInput;
+    };
+    /**
+     *
+     * @param {int} i
+     * @param {Root.Widget.Inputable} input
+     */
+    ns.Array.prototype.setInput = function(i, input) {
+        if(this._aInput[i] === input) return;
+        this._aInput[i] = input;
+        this.notifyObservers(ns.Array.state.REFRESHED);
+    };
+    /**
+     *
+     * @param {Root.Widget.Inputable} input
+     */
+    ns.Array.prototype.pushInput = function(input) {
+        this._aInput.push(input);
+        this.notifyObservers(ns.Array.state.REFRESHED);
+    };
+
+
+})();
+
+(function() {
+    var ns = Root.Widget.Inputable.Array;
+    /**
+     *
+     * @param {Root.Widget.Inputable.Array} ctrl
+     * @param {int} width
+     * @constructor Root.Widget.Inputable.Array.View
+     * @arguments Frame.TemplateView
+     */
+    ns.View = function(ctrl, width) {
+        Frame.TemplateView.call(this, "Root/Widget/Inputable/Array/template.html", ctrl);
+        this.width = width || ns.View.DEFAULT_WIDTH;
+        this.applyTemplate();
+    };
+    ns.View.extend(Frame.TemplateView);
+    ns.View.DEFAULT_WIDTH = 100;
+    ns.View.prototype.onload = function() {
+
+        this._displayRefresh();
+    };
+    ns.View.prototype.update = function(state) {
+        if(this.isTemplateLoading) return;
+        switch(state) {
+        case ns.state.REFRESHED:
+            this._displayRefresh();
+        }
+    };
+    /**
+     * display all the Inputables in controller
+     * @private
+     */
+    ns.View.prototype._displayRefresh = function() {
+        var listWrap = this.eles.listWrap;
+
+        // clear dom
+        listWrap.innerHTML = '';
+
+        // list all Inputable
+        var aInput = this._ctrl.listInput();
+
+        // for each inputable
+        for(var i=0; i<aInput.length; i++) {
+            var input = aInput[i];
+
+            // get its view
+            var view = input.getDefaultView();
+
+            // append the view into dom
+            this._appendInputableView(view);
+
+        }
+    };
+    /**
+     * append a view of an Inputable into dom
+     * @param {Frame.View} view
+     * @private
+     */
+    ns.View.prototype._appendInputableView = function(view) {
+        var itemWrap = this.createWidget(this.eles.listWrap, "itemWrap");
+        itemWrap.style.width = this.width + 'px';
+        itemWrap.appendChild(view.dom);
     }
 })();
 
@@ -2094,31 +2637,33 @@ Frame.main();
 
 (function() {
     var ns = Root;
-    ns.Fyp = function() {
+    ns.COMP2021 = function() {
         Frame.Routable.call(this);
-        this.routeKey = "Fyp";
+        this.routeKey = "COMP2021";
 
         this.bindRoute('Main', function() {
-            return new ns.Fyp.Main();
+            return new ns.COMP2021.Main();
         });
         this.bindRoute('MediaPlayer', function() {
-           return new ns.Fyp.MediaPlayer();
+           return new ns.COMP2021.MediaPlayer();
         });
         this.bindRoute('LearnMore', function() {
-            return new ns.Fyp.LearnMore();
+            return new ns.COMP2021.LearnMore();
+        });
+        this.bindRoute('TagEditor', function() {
+            return new ns.COMP2021.TagEditor(1);
         });
         this.bindRoute(/.*/, function() {
-            return new ns.Fyp.Welcome();
+            return new ns.COMP2021.Welcome();
         })
     };
-    ns.Fyp.extend(Frame.Routable);
+    ns.COMP2021.extend(Frame.Routable);
 })();
 
 (function() {
-    var ns = Root.Fyp;
+    var ns = Root.COMP2021;
     ns.View = function(ctrl) {
         Frame.View.call(this, ctrl);
-
         this._childWrap = null;
         this.navBtnMain = null;
         this.navBtnBrowse = null;
@@ -2130,8 +2675,8 @@ Frame.main();
             {
                 var navBarHeader = this.createElement(navBar, '.navbar-header');
                 {
-                    var navBarBrand = this.createElement(navBarHeader, 'a.navbar-brand', 'FYP');
-                    navBarBrand.href = "#Fyp/Welcome";
+                    var navBarBrand = this.createElement(navBarHeader, 'a.navbar-brand', 'COMP2021');
+                    navBarBrand.href = "#COMP2021/Welcome";
                 }
 
                 var collapse = this.createElement(navBar, ".collapse.navbar-collapse.navbar-ex1-collapse");
@@ -2141,12 +2686,12 @@ Frame.main();
                         this.navBtnMain = this.createElement(navBarNav, "li");
                         {
                             var a=this.createElement(this.navBtnMain, 'a', 'Main');
-                            a.href = "#Fyp/MediaPlayer";
+                            a.href = "#COMP2021/MediaPlayer";
                         }
                         this.navBtnBrowse = this.createElement(navBarNav, "li");
                         {
                             a = this.createElement(this.navBtnBrowse, 'a', 'Browse');
-                            a.href = "#Fyp/Welcome";
+                            a.href = "#COMP2021/Welcome";
                         }
                     }
                 }
@@ -2157,21 +2702,18 @@ Frame.main();
 
         }
 
-
     };
     ns.View.extend(Frame.View);
-    ns.View.prototype.update = function(state) {
-        switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            var child = this._ctrl.getRouteChild();
-            this._clearActiveNavBtn();
-            if(child instanceof ns.MediaPlayer) {
-                this.navBtnMain.classList.add("active");
-            }
-            this._childWrap.innerHTML = '';
-            var view = Frame.createDefaultView(child);
-            this._childWrap.appendChild(view.dom);
+
+    ns.View.prototype.onRouteChange = function() {
+        var child = this._ctrl.getRouteChild();
+        this._clearActiveNavBtn();
+        if(child instanceof ns.MediaPlayer) {
+            this.navBtnMain.classList.add("active");
         }
+        this._childWrap.innerHTML = '';
+        var view = Frame.createDefaultView(child);
+        this._childWrap.appendChild(view.dom);
     };
 
     ns.View.prototype._clearActiveNavBtn = function() {
@@ -2199,365 +2741,456 @@ Frame.main();
     }
 })();
 
-(function(){
-    var ns = Root.Fyp;
-    ns.Main = function() {
-        Frame.Routable.call(this);
-        this.routeKey = 'Main';
-        this.view = null;
+(function() {
+    var ns = Root.COMP2021;
+    ns.Api = function() {
 
+    };
+    ns.Api.SERVER = "server/comp2021";
+    /**
+     *
+     * @param {string} path
+     * @param {Object} data
+     * @param {Root.COMP2021.Api.request.callback} callback
+     * @param {Function} [onerror]
+     */
+    ns.Api.request = function(path, data, callback, onerror) {
+        if(path[0] !== "/") path = "/" + path;
+        path = path.replace(/\.php/g, '.pl');
+        if(typeof(data) === 'function') {
+            onerror = callback;
+            callback = data;
+            data = {};
+        }
 
-        this.iframe = null; // hold the target web page
-        this.hoveredElement = null; // remember the last hovered element, prevent re-drawing the same rect
-        this.selectionAgent = new ns.Main.SelectionAgent();
+        if(!onerror) onerror = function(){};
+        path = ns.Api.SERVER + path;
 
+        var rtn = new ns.Api.RequestObject(path, data);
 
-        this._initFrame();
-
-        var that = this;
-        document.addEventListener("keydown",function(e) {
-            that._onKeyDown(e);
+        Util.ajaxPost(path, data, function(r) {
+            r = ns.Api.returnStrToJson(r);
+            if(!r) {
+                console.error("api request failed");
+                onerror(0);
+                rtn.onfinish();
+                return;
+            }
+            if(!ns.Api.rtnCodeGlobalCheck(r.code)) {
+                onerror(r.code);
+                rtn.onfinish();
+                return;
+            }
+            callback(r.value, r.code, r.value);
+            rtn.onfinish();
+        }, function() {
+            var Toast = Root.Widget.Toast;
+            frame.root.toast("Server unreachable.", Toast.type.ERROR);
+            onerror(0);
+            rtn.onfinish();
         });
-
-        window.fyp = this;
-        this.setChanged(ns.Main.state.INIT);
-
+        return rtn;
     };
-    ns.Main.extend(Frame.Routable);
-    ns.Main.state = {
-        INIT:Util.uniqueInt(),
-        IFRAME_LOADING:Util.uniqueInt(),
-        IFRAME_LOADED:Util.uniqueInt(), // time to draw mask for the new iframe
-        ERR_PLEASE_SUFFER:Util.uniqueInt(), // missing --disable-web-security
-        ADD_SELECTION:Util.uniqueInt(),
-        REMOVE_SELECTION:Util.uniqueInt(),
-        HOVER:Util.uniqueInt(),
-
-    };
-
-    ns.Main.prototype._initFrame = function() {
-        this.iframe = Util.createElement('iframe');
-        this.iframe.sandbox = 'allow-scripts allow-same-origin';
-    };
-    /**
-     * set the src of the iframe and add mouseover effect
-     * @param {string} url
-     */
-    ns.Main.prototype.loadUrl = function(url) {
-        this.iframe.src = url;
-
-        // state: iframe loading
-        this.setChanged(ns.Main.state.IFRAME_LOADING);
-        this.notifyObservers();
-
-        // when iframe has finished loading
-        var that = this;
-        this.iframe.onload = function() {
-            that._iframeOnload();
-        }
-
-    };
-    /**
-     * add mouseover event to iframe
-     * @private
-     */
-    ns.Main.prototype._iframeBindEvents = function() {
-        try{
-            var contentDocument = this.iframe.contentDocument;
-            var contentWindow = this.iframe.contentWindow;
-        }
-        catch(e) {
-            this.setChanged(ns.Main.state.ERR_PLEASE_SUFFER);
-            this.notifyObservers();
-        }
-
-        // add mouseover event
-        var that = this;
-        contentDocument.onmouseover = function(e) {
-
-            if(e.target == that.hoveredElement) return;
-
-            that.hoveredElement = e.target;
-
-            // notify observer to change hover mask
-            that.setChanged(ns.Main.state.HOVER);
-            that.notifyObservers();
-
+    ns.Api.request.callback = function(value, rtnCode, rtnValue){};
+    ns.Api.waitFor = function(aRequestObject, callback) {
+        var nRequest = aRequestObject.length;
+        var finishedCnt = 0;
+        var requestCallback = function() {
+            finishedCnt++;
+            if(finishedCnt >= nRequest) {
+                callback();
+            }
         };
-
-        // add select and deselect event
-        // press A means add, press S means remove
-        contentDocument.addEventListener('keydown',function(e) {
-            that._onKeyDown(e);
-        });
-
-    };
-
-    ns.Main.prototype.addSelection = function() {
-
-        this.selectionAgent.addSelection(this.hoveredElement);
-        this.setChanged(ns.Main.state.ADD_SELECTION);
-        this.notifyObservers();
-    };
-    ns.Main.prototype.removeSelection = function() {
-        this.selectionAgent.removeSelection(this.hoveredElement);
-        this.setChanged(ns.Main.state.REMOVE_SELECTION);
-        this.notifyObservers();
-    };
-    ns.Main.prototype.cancelIframeLoading = function() {
-        this.iframe.contentWindow.stop();
-        this._iframeOnload();
-    };
-    ns.Main.prototype._onKeyDown = function(e) {
-
-        switch(e.keyCode) {
-        case 'A'.charCodeAt(0):
-            if(!this.hoveredElement) return;
-            this.addSelection();
-            break;
-        case 'S'.charCodeAt(0):
-            if(!this.hoveredElement) return;
-            this.removeSelection();
-            break;
+        for(var i=0; i<nRequest; i++) {
+            aRequestObject[i].onfinish = requestCallback;
         }
     };
-    ns.Main.prototype._iframeOnload = function() {
-        // preprocess iframe
-        this._iframeBindEvents();
+    ns.Api.returnStrToJson = function(str) {
+        var rtn;
+        if(typeof(str) === 'string') {
+            try {
+                rtn = eval("(" + str + ")");
+            }
+            catch(e) {
+                return false;
+            }
+        }
+        else {
+            rtn = str;
+        }
 
-        // change state
-        this.setChanged(ns.Main.state.IFRAME_LOADED);
-        this.notifyObservers();
-        this.setChanged(ns.Main.state.ADD_SELECTION);
-        this.notifyObservers();
+        if(typeof(rtn) !== 'object') return false;
+        if(typeof(rtn.code) !== 'number') return false;
+        if(typeof(rtn.msg) !== 'string') return false;
+        if(!rtn.hasOwnProperty('value')) return false;
+        return rtn;
+    };
+    ns.Api.rtnCodeGlobalCheck = function(rtnCode) {
+        switch(rtnCode) {
+        case 400:
+            console.error("api request failed");
+            return true;
+        case 401:
+            location.hash = "#COMP2021/Welcome";
+            return false;
+        }
+        return true;
+    }
+})();
+(function() {
+    var ns = Root.COMP2021.Api;
+    ns.RequestObject = function(path, data) {
+        this.path = path;
+        this.data = data;
+        this.onfinish = function() {};
     };
 })();
 
-var ns = Root.Fyp.Main;
-ns.View = function(ctrl) {
-    Frame.View.call(this, ctrl);
-
-    this.dom = null;
-
-    this._mask = null; // the mask covering the whole iframe
-    this._hoverMask = null; // the mask to show the current selection
-    this._selectionAgentView = Frame.createDefaultView(ctrl.selectionAgent);
-    this._iframeLoadedRow = null;
-    this._urlInput = null;
-    this._btnLoadUrl = null;
-    this._iframeLoadingRow = null;
-    this._btnCancelLoading = null;
-
-
-
-    var dom = this.createElement(".Main");
-    this.dom = dom;
-    {
-        dom.appendChild(ctrl.iframe);
-        var leftWrap = this.createElement(dom, '.leftWrap');
-        {
-            var row = this.createElement(leftWrap, '');
-            this._iframeLoadedRow = row;
-            {
-                var inputGroup = this.createElement(row, '.input-group');
-                {
-                    this._urlInput = this.createElement(inputGroup, 'input[type=text].form-control');
-                    {
-                        this._urlInput.placeholder = 'http://';
-                    }
-                    var span = this.createElement(inputGroup, 'span.input-group-btn');
-                    {
-                        this._btnLoadUrl = this.createElement(span, 'button.btn.btn-default', 'Load');
-                    }
-
-                }
-
-            }
-
-            row = this.createElement(leftWrap, '.iframeLoadingRow');
-            this._iframeLoadingRow = row;
-            {
-                inputGroup = this.createElement(row, '.input-group');
-                {
-                    var progress = this.createElement(inputGroup, '.progress.progress-striped.active');
-                    {
-                        var progressBar = this.createElement(progress, '.progress-bar');
-                        {
-                            progressBar.style.width = '100%';
-                            progressBar.innerHTML = 'waiting for iframe';
-                        }
-                    }
-                    span = this.createElement(inputGroup, 'span.input-group-btn');
-                    {
-                        this._btnCancelLoading = this.createElement(span, 'button.btn.btn-default', 'Stop Loading');
-                    }
-                }
-
-            }
-
-
-
-            leftWrap.appendChild(this._ctrl.iframe);
-
-        }
-
-        var selectionAgentWrap = this.createElement('.selectionAgentWrap');
-        dom.appendChild(selectionAgentWrap);
-        {
-
-            var selectionAgentDom = this._selectionAgentView.dom;
-            selectionAgentWrap.appendChild(this._selectionAgentView.dom);
-
-        }
-
-    }
-
-    // bind events
-    var that = this;
-    this._btnLoadUrl.addEventListener('click', function() {
-        that._handleLoadUrl();
-    });
-    this._urlInput.addEventListener('keypress', function(e) {
-        if(e.which == 13) {
-            that._handleLoadUrl();
-        }
-    });
-    this._btnCancelLoading.addEventListener('click', function() {
-        that._ctrl.cancelIframeLoading();
-    });
-
-    // avoid modifying selection when typing into url input box
-    this._urlInput.addEventListener('keydown', function(e) {
-        e.stopPropagation();
-    });
-
-    this._styleIff();
-
-    // add a default value for url input
-    this._urlInput.value = 'http://www.sina.com';
-
-};
-ns.View.extend(Frame.View);
-ns.View.prototype.update = function(state) {
-
-    this._iframeLoadedRow.style.display = 'block';
-    this._iframeLoadingRow.style.display = 'none';
-    this._ctrl.iframe.style.display = 'block';
-    switch(state) {
-    case ns.state.INIT:
-        this._ctrl.iframe.style.display = 'none';
-        break;
-    case ns.state.IFRAME_LOADING:
-        this._iframeLoadedRow.style.display = 'none';
-        this._iframeLoadingRow.style.display = 'block';
-        this._ctrl.iframe.style.display = 'block';
-        break;
-    case ns.state.IFRAME_LOADED:
-        // append all the gui element when the iframe is loaded
-        var iffBody = this._ctrl.iframe.contentDocument.body;
-
-        var mask = Util.createElement('.Fyp-mask');
-        this._mask = mask;
-        iffBody.appendChild(mask);
-        {
-            var hoverMask = Util.createElement('.hoverMask');
-            this._hoverMask = hoverMask;
-            mask.appendChild(hoverMask);
-        }
-        this._addMaskStylesheet();
-        break;
-    case ns.state.ERR_PLEASE_SUFFER:
-        frame.root.toast("Cannot read contents in iframe. Possibly missing <code>--disable-web-security</code> flag.",
-            Root.Widget.Toast.type.ERROR, Root.Widget.Toast.duration.PERM
-        );
-        break;
-    case ns.state.HOVER:
-
-        if(this._ctrl.hoveredElement) {
-            // relocate the hoverMask to fit the hoveredElement
-            var rect = this._ctrl.hoveredElement.getBoundingClientRect();
-            this._hoverMask.style.left = rect.left + 'px';
-            this._hoverMask.style.top = rect.top + 'px';
-            this._hoverMask.style.width = rect.width + 'px';
-            this._hoverMask.style.height = rect.height + 'px';
-
-
-        }
-        break;
-    }
-};
-/**
- * add stylesheet for mask by javascript. because .css stylesheet cannot apply to elements inside iframe.
- * @private
- */
-ns.View.prototype._addMaskStylesheet = function() {
-    this._mask.style.position = 'fixed';
-    this._mask.style.left = '0';
-    this._mask.style.top = '0';
-    this._mask.style.width = '100%';
-    this._mask.style.height = '100%';
-    this._mask.style.pointerEvents = 'none';
-    this._hoverMask.style.position = 'absolute';
-
-    this._hoverMask.style.backgroundColor = 'hsla(240,50%,80%,0.5)';
-};
-/**
- * style the iframe of controller. since this iframe is not created in this view, we can only use javascript to style it.
- * @private
- */
-ns.View.prototype._styleIff = function() {
-    var iff = this._ctrl.iframe;
-    iff.style.width = '800px';
-    iff.style.height = '600px';
-    iff.style.border = 'none';
-    iff.style.backgroundColor = 'white';
-};
-ns.View.prototype._handleLoadUrl = function() {
-    var url = this._urlInput.value;
-    if(!Util.URL_REGEX.test(url)) {
-        frame.root.toast("Please enter a valid url.", Root.Widget.Toast.type.ERROR);
-        return;
-    }
-    this._ctrl.loadUrl(url);
-};
-
-var ns = Root.Fyp.Main;
-ns.View.css = {
-    '.Main': {
-        position:'relative',
-    },
-    '.leftWrap': {
-        display:'inline-block',
-        width:'800px',
-        height:'500px',
-    },
-    '.selectionAgentWrap': {
-        position:'absolute',
-        display:'inline-block',
-        top:'0',
-        left:'810px',
-        width:'400px',
-        height:'100px',
-    },
-    '.selectionAgentWrap > *': {
-        position:'absolute',
-        top:'0px',
-    },
-    '.iframeLoadingRow .progress': {
-        margin:'0',
-        height:'34px'
-    },
-    '.iframeLoadingRow .progress-bar': {
-        height:'34px',
-        'line-height':'34px'
-    }
-};
-
 (function(){
-    var ns = Root.Fyp;
+    var ns = Root.COMP2021;
+    var Api = ns.Api;
     /**
      *
-     * @constructor Root.Fyp.MediaPlayer
+     * @constructor Root.COMP2021.Main
+     * @arguments Frame.Routable
+     */
+    ns.Main = function() {
+        Frame.Routable.call(this);
+        this.routeKey = 'Main';
+        this.audios = {};
+        this.mediaPlayer = new ns.MediaPlayer();
+        this.selectedAudioId = null;
+        this.aActiveAudioTag = [];
+        this.aAllTag = [];
+        this.requestAudioList();
+
+    };
+    ns.Main.extend(Frame.Routable);
+    ns.Main.Audio = function() {
+        this.id = '0';
+        this.url = '';
+        this.name = '';
+        this.category = '';
+        this.ratingValue = 0;
+        this.predictedRating = 0.0;
+    };
+    ns.Main.state = {
+        REFRESHED:Util.uniqueInt(),
+        SELECTION_CHANGED:Util.uniqueInt(),
+        RATING_CHANGED:Util.uniqueInt(),
+        RECOMMENDATION_CHANGED:Util.uniqueInt(),
+        TAG_UPDATED:Util.uniqueInt(),
+        EDITING_TAG:Util.uniqueInt(),
+    };
+    ns.Main.recommendation = {
+        ITEM_BASED:"ItemBased",
+        USER_BASED:"UserBased",
+        TAG_BASED:"TagBased",
+    };
+    ns.Main.prototype.requestAudioList = function() {
+        var that = this;
+        Api.request("/listAudio.php", function(value) {
+            that.audios = {};
+            for(var i=0; i<value.length; i++) {
+                var audio = value[i];
+                that.audios[audio.id] = audio;
+            }
+            that.notifyObservers(ns.Main.state.REFRESHED);
+        });
+    };
+
+    ns.Main.prototype.requestRateAudio = function(ratingValue) {
+        if(this.selectedAudioId === null) return;
+        var that = this;
+        Api.request('/rate.php',{audioId:this.selectedAudioId, rating:ratingValue},function() {
+            var audio = that.audios[that.selectedAudioId];
+            audio.ratingValue = ratingValue;
+            that.notifyObservers(ns.Main.state.RATING_CHANGED);
+        });
+
+    };
+    ns.Main.prototype.requestRecommend = function(algm) {
+        var that = this;
+        Api.request("/recommend.php",{algorithm: algm},function(aPair) {
+            for(var i=0; i<aPair.length; i++) {
+                var pair = aPair[i];
+                that.getAudioById(pair.id).predictedRating = pair.predictedRating;
+            }
+            frame.root.toast("recommendation performed");
+            that.notifyObservers(ns.Main.state.RECOMMENDATION_CHANGED);
+        })
+    };
+    /**
+     * get tags of active audio from server
+     */
+    ns.Main.prototype.requestTagUpdate = function() {
+        // get selected audio id
+        var selectedAudioId = this.selectedAudioId;
+        if(!selectedAudioId) return;
+
+        // request tag list from server
+        var that = this;
+        Api.request("/tag/listTag.php",{audioId:selectedAudioId}, function(value) {
+            // if selected audio has changed, do nothing
+            if(selectedAudioId != that.selectedAudioId) return;
+
+            // update aActiveAudioTag
+            that.aActiveAudioTag = value;
+
+            // notify observers
+            that.notifyObservers(ns.Main.state.TAG_UPDATED);
+        });
+
+
+    };
+    ns.Main.prototype.selectAudio = function(index) {
+        this.selectedAudioId = index;
+        var audio = this.audios[index];
+        this.mediaPlayer.loadAudio(Api.SERVER + '/' + audio.url);
+        this.notifyObservers(ns.Main.state.SELECTION_CHANGED);
+        //TODO: temp removal for comp2021 this.requestTagUpdate();
+    };
+
+    ns.Main.prototype.getAudioById = function(id) {
+        return this.audios[id];
+    };
+    ns.Main.prototype.getActiveAudio = function() {
+        if(this.selectedAudioId === null) return null;
+        return this.audios[this.selectedAudioId];
+    };
+    ns.Main.prototype.editTag = function() {
+        this.notifyObservers(ns.Main.state.EDITING_TAG);
+    };
+
+})();
+
+(function() {
+    var ns = Root.COMP2021.Main;
+    /**
+     *
+     * @param ctrl
+     * @constructor Root.COMP2021.Main.View
+     * @arguments Frame.TemplateView
+     */
+    ns.View = function(ctrl) {
+        Frame.TemplateView.call(this,'Root/COMP2021/Main/template.html', ctrl);
+
+        this.applyTemplate();
+    };
+    ns.View.extend(Frame.TemplateView);
+    ns.View.AUDIO_INDEX_VARNAME = Util.uniqueName();
+    ns.View.prototype.onload = function() {
+        var playerView = this._ctrl.mediaPlayer.getDefaultView();
+        this.eles.mediaPlayerWrap.appendChild(playerView.dom);
+
+        // rating audio
+        var ctrl = this._ctrl;
+        var aStar = this.querySelectorAll('.star');
+        for(var i=0; i<aStar.length; i++) {
+            (function(index, star) {
+                star.onclick = function() {
+                    ctrl.requestRateAudio(index);
+                }
+            })(i, aStar[i]);
+        }
+        this.eles.btnItemBased.onclick = function() {
+            ctrl.requestRecommend(ns.recommendation.ITEM_BASED);
+        };
+        this.eles.btnUserBased.onclick = function() {
+            ctrl.requestRecommend(ns.recommendation.USER_BASED);
+        };
+        this.eles.btnTagBased.onclick = function() {
+            ctrl.requestRecommend(ns.recommendation.TAG_BASED);
+        };
+        this.eles.btnEditTag.onclick = function() {
+            ctrl.editTag();
+        };
+
+    };
+    ns.View.prototype.update = function(state) {
+        if(this.isTemplateLoading) return;
+
+        this._displayHasActiveAudio(this._ctrl.selectedAudioId);
+
+        switch(state) {
+        case ns.state.REFRESHED:
+            this._displayAudios();
+            this._displaySelectAudio(this._ctrl.selectedAudioId);
+            break;
+        case ns.state.SELECTION_CHANGED:
+            this._displaySelectAudio(this._ctrl.selectedAudioId);
+            break;
+        case ns.state.RATING_CHANGED:
+        case ns.state.RECOMMENDATION_CHANGED:
+            this._displayRefreshRatings();
+            break;
+        case ns.state.TAG_UPDATED:
+            this._displayTag();
+            break;
+        case ns.state.EDITING_TAG:
+            this._displayEditTag();
+            break;
+        }
+    };
+    ns.View.prototype._displayHasActiveAudio = function(has) {
+        if(has) {
+            this.eles.activeAudio.classList.remove('hide');
+            this.eles.noActiveAudio.classList.add('hide');
+        }
+        else {
+            this.eles.activeAudio.classList.add('hide');
+            this.eles.noActiveAudio.classList.remove('hide');
+        }
+    };
+    ns.View.prototype._displayAudios = function() {
+        this.eles.audioTabWrap.innerHTML = '';
+
+        var audios = this._ctrl.audios;
+        // group audios by category
+        var hashTable = {};
+        for(var i in audios) {
+            if(!audios.hasOwnProperty(i)) continue;
+            var audio = audios[i];
+            var category = audio.category;
+            if(!hashTable.hasOwnProperty(category)) hashTable[category] = [];
+            hashTable[category].push(audio);
+
+        }
+
+        var that = this;
+        for(category in hashTable) {
+            if(!hashTable.hasOwnProperty(category)) continue;
+
+            // draw header
+            this.createWidget(this.eles.audioTabWrap, "audioTabHeader", category);
+            // draw audioTabs
+            var aAudio = hashTable[category];
+            for(var i=0; i<aAudio.length; i++) {
+                var audio = aAudio[i];
+                var audioTab = this.createWidget(this.eles.audioTabWrap, 'audioTab');
+                audioTab.eles.name.html(audio.name);
+                audioTab.eles.url.html(audio.url);
+                audioTab[ns.View.AUDIO_INDEX_VARNAME] = audio.id;
+                this._displayRating(audioTab, audio);
+                audioTab.onclick = function() {
+                    that._ctrl.selectAudio(this[ns.View.AUDIO_INDEX_VARNAME]);
+                }
+            }
+
+        }
+
+    };
+    ns.View.prototype._displayRating = function(wrap, audio) {
+        var aStar = wrap.querySelectorAll('.star');
+        var rating;
+        var isPredicted = false;
+        if(audio.ratingValue !== null) {
+            rating = audio.ratingValue;
+        }
+        else if(audio.predictedRating !== null) {
+            rating = audio.predictedRating;
+            isPredicted = true;
+        }
+        for(var i=0; i<aStar.length; i++) {
+            var star = aStar[i];
+            star.classList.remove('predicted');
+            if(i <= rating + 0.5) {
+                star.classList.add('active');
+                if(isPredicted) star.classList.add('predicted');
+            }
+            else {
+                star.classList.remove('active');
+            }
+        }
+
+        // display a rating value
+        var domValue = wrap.querySelector('.ratingValue');
+        if(domValue && typeof(rating)=='number') {
+            domValue.classList.remove('predicted');
+            domValue.html(Math.round((rating + 1)*100)/100);
+            if(isPredicted) domValue.classList.add('predicted');
+        }
+
+    };
+    ns.View.prototype._displaySelectAudio = function(id) {
+
+        // left audio list
+        var aWidget = this.querySelectorAll('.audioTab');
+        for(var i=0; i<aWidget.length; i++) {
+            var widget = aWidget[i];
+            if(widget[ns.View.AUDIO_INDEX_VARNAME] === id) {
+                widget.classList.add('active');
+            }
+            else {
+                widget.classList.remove('active');
+            }
+        }
+        if(id === null) return;
+        var audio = this._ctrl.audios[id];
+
+        // right content
+        this.eles.name.html(audio.name);
+        this._displayRating(this.eles.rating, audio);
+
+    };
+    ns.View.prototype._displayRefreshRatings = function() {
+        var aWidget = this.querySelectorAll('.audioTab');
+        for(var i=0; i<aWidget.length; i++) {
+            var widget = aWidget[i];
+            var id = widget[ns.View.AUDIO_INDEX_VARNAME];
+            var audio = this._ctrl.getAudioById(id);
+            this._displayRating(widget, audio);
+        }
+        if(this._ctrl.getActiveAudio()) this._displayRating(this.eles.rating, this._ctrl.getActiveAudio());
+    };
+    ns.View.prototype._displayTag = function() {
+        var aTag = this._ctrl.aActiveAudioTag;
+        this.eles.displayWrap.classList.remove('hide');
+        this.eles.editorWrap.classList.add('hide');
+        this.eles.tagWrap.innerHTML = '';
+        for(var i=0; i<aTag.length; i++) {
+            this.createWidget(this.eles.tagWrap, 'tag', aTag[i]);
+
+        }
+    };
+    ns.View.prototype._displayEditTag = function() {
+        if(!this._ctrl.selectedAudioId) return;
+        this.eles.displayWrap.classList.add('hide');
+        this.eles.editorWrap.classList.remove('hide');
+
+        // create a TagEditor
+        var TagEditor = Root.COMP2021.TagEditor;
+
+        // append its view into editorWrap
+        var editor = new TagEditor(this._ctrl.selectedAudioId);
+        var eEditorWrap = this.eles.editorWrap;
+        eEditorWrap.innerHTML = '';
+        eEditorWrap.appendChild(editor.getDefaultView().dom);
+
+        // add events
+        var that = this;
+        var ctrl = this._ctrl;
+
+        // update tags on EDIT_SUCCESS
+        editor.bind(TagEditor.event.EDIT_SUCCESS, function() {
+            ctrl.requestTagUpdate();
+        });
+
+        // display tags on this view only on DONE
+        editor.bind(TagEditor.event.DONE, function() {
+            that._displayTag();
+        });
+    };
+
+
+
+})();
+
+(function(){
+    var ns = Root.COMP2021;
+    /**
+     *
+     * @constructor Root.COMP2021.MediaPlayer
      * @arguments Frame.Routable
      */
     ns.MediaPlayer = function() {
@@ -2567,7 +3200,6 @@ ns.View.css = {
         // init audio player
         this._eAudio = Util.createElement('audio');
         this._eAudio.setAttribute('autoplay', 'true');
-        this.loadAudio("res/fyp/Human1.mp3");
         window.mediaPlayer = this;
 
         var that = this;
@@ -2577,6 +3209,8 @@ ns.View.css = {
             }
 
         });
+        this.notifyObservers(ns.MediaPlayer.state.buffering);
+        window.m = this;
     };
     ns.MediaPlayer.extend(Frame.Routable);
 
@@ -2633,14 +3267,14 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.MediaPlayer;
+    var ns = Root.COMP2021.MediaPlayer;
     /**
      *
-     * @constructor Root.Fyp.MediaPlayer
+     * @constructor Root.COMP2021.MediaPlayer
      * @arguments Frame.TemplateView
      */
     ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, "Root/Fyp/MediaPlayer/template.html", ctrl);
+        Frame.TemplateView.call(this, "Root/COMP2021/MediaPlayer/template.html", ctrl);
         this.dom = this.createElement('.fill-height');
         this._isProgressDragging = false;
         this._isProgressAnimating = false;
@@ -2683,6 +3317,7 @@ ns.View.css = {
     };
     ns.View.prototype.update = function(state) {
         if(this.isTemplateLoading) return;
+
         if(this._ctrl.albumImageSrc) {
             this.eles.videoWrap.style.backgroundImage = "url("+this._ctrl.albumImageSrc+")";
         }
@@ -2691,6 +3326,7 @@ ns.View.css = {
 
         this.eles.btnPlay.classList.add('hide');
         this.eles.btnPause.classList.add('hide');
+
         switch(state) {
         case ns.state.playing:
             this.eles.btnPause.classList.remove('hide');
@@ -2766,7 +3402,7 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp;
+    var ns = Root.COMP2021;
     ns.LearnMore = function() {
         Frame.Routable.call(this);
         this.routeKey = 'LearnMore';
@@ -2779,9 +3415,9 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.LearnMore;
+    var ns = Root.COMP2021.LearnMore;
     ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, "Root/Fyp/LearnMore/template.html", ctrl);
+        Frame.TemplateView.call(this, "Root/COMP2021/LearnMore/template.html", ctrl);
         this.dom = this.createElement('.container');
 
         this.applyTemplate();
@@ -2796,208 +3432,7 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.Main;
-    ns.SelectionAgent = function() {
-        Util.Observable.call(this);
-        this.aItem = [];
-        this.setChanged(ns.SelectionAgent.state.SELECTION_CHANGED);
-    };
-
-    ns.SelectionAgent.extend(Util.Observable);
-    ns.SelectionAgent.state = {
-        SELECTION_CHANGED:Util.uniqueInt(),
-    };
-    ns.SelectionAgent.prototype.addSelection = function(dom) {
-        // check conflict
-        var i = this.listSelection().indexOf(dom);
-        if(i>=0) return;
-
-        // create item
-        var item = new ns.SelectionAgent.Item(dom);
-        this.aItem.push(item);
-
-        // listen close event, remove this item on close
-        var that = this;
-        item.bind(ns.SelectionAgent.Item.event.REMOVED, function() {
-            that.removeSelection(this.domItem);
-        });
-
-        // notify observers
-        this.setChanged(ns.SelectionAgent.state.SELECTION_CHANGED);
-        this.notifyObservers();
-    };
-    ns.SelectionAgent.prototype.removeSelection = function(dom) {
-        var i = this.listSelection().indexOf(dom);
-        if(i<0) return;
-        this.aItem.splice(i,1);
-        this.setChanged(ns.SelectionAgent.state.SELECTION_CHANGED);
-        this.notifyObservers();
-    };
-    ns.SelectionAgent.prototype.listSelection = function() {
-        var rtn = [];
-        for(var i=0;i<this.aItem.length; i++) {
-            rtn.push(this.aItem[i].domItem);
-        }
-        return rtn;
-    };
-    ns.SelectionAgent.prototype._guessRule = function() {
-        //todo: guess a rule
-    }
-
-
-})();
-
-(function() {
-    var ns = Root.Fyp.Main.SelectionAgent;
-    ns.View = function(ctrl) {
-        Frame.View.call(this, ctrl);
-
-        var dom = this.createElement();
-        this.dom = dom;
-
-    };
-    ns.View.extend(Frame.View);
-    ns.View.prototype.update = function(state) {
-        switch(state) {
-        case ns.state.SELECTION_CHANGED:
-            this.dom.innerHTML = "";
-            var aItem = this._ctrl.aItem;
-            for(var i=0;i<aItem.length;i++) {
-                var wrap = Util.createElement(".itemWrap");
-                this.dom.appendChild(wrap);
-                {
-                    var view = Frame.createDefaultView(aItem[i]);
-                    console.log(view.dom);
-                    wrap.appendChild(view.dom);
-                }
-            }
-            break;
-        }
-    }
-})();
-
-(function() {
-    var ns = Root.Fyp.Main.SelectionAgent;
-    /**
-     * an item of selection
-     * @constructor
-     * @param {HTMLElement} domItem
-     */
-    ns.Item = function(domItem) {
-        Frame.Routable.call(this);
-        this.routeKey = 'Item';
-        this.domItem = domItem;
-
-        this.elementCrumb = ns.Item.ElementCrumb.fromDom(domItem);
-
-    };
-    ns.Item.extend(Frame.Routable);
-
-    ns.Item.event = {
-        REMOVED: Util.uniqueInt()
-    };
-    ns.Item.prototype.close = function() {
-        this.trigger(ns.Item.event.REMOVED);
-    }
-
-})();
-
-(function() {
-    var ns = Root.Fyp.Main.SelectionAgent.Item;
-    ns.ElementCrumb = function() {
-        Array.call(this);
-    };
-    ns.ElementCrumb.extend(Array);
-    ns.ElementCrumb.fromDom = function(dom) {
-        var rtn = new ns.ElementCrumb();
-        while(dom && (dom instanceof HTMLElement)) {
-            rtn.unshift(ns.ElementCrumbUnit.fromDom(dom));
-            dom = dom.parentNode;
-        }
-        return rtn;
-    }
-})();
-
-(function() {
-    var ns = Root.Fyp.Main.SelectionAgent.Item;
-    ns.ElementCrumbUnit = function() {
-        this.tagName = '';
-        this.id = '';
-        this.aClassName = [];
-    };
-    ns.ElementCrumbUnit.prototype.toString = function() {
-        var rtn = this.tagName;
-        if(this.id) rtn += '#' + this.id;
-        for(var i=0; i<this.aClassName.length; i++) {
-            rtn += '.' + this.aClassName[i];
-        }
-        return rtn;
-    };
-    ns.ElementCrumbUnit.fromDom = function(dom) {
-        var rtn = new ns.ElementCrumbUnit();
-        rtn.tagName = dom.tagName;
-        rtn.id = dom.id;
-        if(dom.className) rtn.aClassName = dom.className.split(' ');
-        return rtn;
-    };
-})();
-
-(function() {
-    var ns = Root.Fyp.Main.SelectionAgent.Item;
-    ns.View = function(ctrl) {
-        Frame.View.call(this, ctrl);
-        this.dom = null;
-        this._domCrumb = null;
-        this._container = null;
-        this._btnClose = null;
-        this.dom = this.createElement('.panel.panel-default.wrap');
-        {
-            var panelHeading = this.createElement(this.dom, '.panel-heading');
-            {
-                this._domCrumb = this.createElement(panelHeading, 'ol.breadcrumb');
-                this._btnClose = this.createElement(panelHeading, 'button.close');
-            }
-            this._container = this.createElement(this.dom, '.panel-body');
-        }
-
-        this._drawElementCrumb();
-
-        // draw a copy of domItem
-        this._container.appendChild(this._ctrl.domItem.cloneNode(true));
-
-        // bind events
-        var that = this;
-        this._btnClose.addEventListener('click', function() {
-            that._ctrl.close();
-        });
-
-
-    };
-    ns.View.extend(Frame.View);
-    ns.View.css = {
-        '.wrap': {
-            position:'relative',
-        },
-        '.breadcrumb': {
-            margin:0,
-            padding:0
-        }
-    };
-    /**
-     * draw the element crumb into domCrumb
-     * @private
-     */
-    ns.View.prototype._drawElementCrumb = function() {
-        this._domCrumb.innerHTML = '';
-        for(var i=0; i<this._ctrl.elementCrumb.length; i++) {
-            var elementCrumbUnit = this._ctrl.elementCrumb[i];
-            this.createElement(this._domCrumb, 'li', elementCrumbUnit.toString());
-        }
-    }
-})();
-
-(function() {
-    var ns = Root.Fyp;
+    var ns = Root.COMP2021;
     ns.Welcome = function() {
         Frame.Routable.call(this);
         this.routeKey = 'Welcome';
@@ -3005,7 +3440,7 @@ ns.View.css = {
 
         // handle events
         this.login.bind(ns.Welcome.Login.event.SUCCESS, function() {
-            location.hash = '#Fyp/MediaPlayer';
+            location.hash = '#COMP2021/Main';
         });
 
     };
@@ -3014,9 +3449,9 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.Welcome;
+    var ns = Root.COMP2021.Welcome;
     ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, 'Root/Fyp/Welcome/template.html', ctrl);
+        Frame.TemplateView.call(this, 'Root/COMP2021/Welcome/template.html', ctrl);
         this.applyTemplate();
     };
     ns.View.extend(Frame.TemplateView);
@@ -3028,12 +3463,12 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.Welcome;
+    var ns = Root.COMP2021.Welcome;
+    var Api = Root.COMP2021.Api;
     ns.Login = function() {
         Frame.Routable.call(this);
         this.routeKey = 'Login';
 
-        this.username = '';
         this.profileImg = '';
 
         this.setChanged(ns.Login.state.NORMAL);
@@ -3050,24 +3485,26 @@ ns.View.css = {
         SUCCEED: Util.uniqueInt(),
         FAILED: Util.uniqueInt()
     };
-    ns.Login.prototype.setUsername = function(username) {
-        this.username = username;
-        this.setChanged(ns.Login.state.NORMAL);
-        this.notifyObservers();
-    };
+
     ns.Login.prototype.setProfileImg = function(dataUrl) {
         this.profileImg = dataUrl;
         this.notifyObservers(ns.Login.state.NORMAL);
     };
-    ns.Login.prototype.login = function() {
+    ns.Login.prototype.login = function(username, password) {
         this.notifyObservers(ns.Login.state.LOGGING_IN);
         var that = this;
-        // login success
-        (function() {
-            that.setChanged(ns.Login.state.SUCCEED);
-            that.notifyObservers();
-            that.trigger(ns.Login.event.SUCCESS);
-        })();
+        Api.request('/auth/login.php',{username:username,password:password},function(value, code) {
+            if(code === 200) {
+                that.setChanged(ns.Login.state.SUCCEED);
+                that.notifyObservers();
+                that.trigger(ns.Login.event.SUCCESS);
+            }
+            else {
+                that.notifyObservers(ns.Login.state.FAILED);
+            }
+        }, function() {
+            that.notifyObservers(ns.Login.state.FAILED);
+        });
 
     };
     ns.Login.prototype.close = function() {
@@ -3077,11 +3514,11 @@ ns.View.css = {
 })();
 
 (function() {
-    var ns = Root.Fyp.Welcome.Login;
+    var ns = Root.COMP2021.Welcome.Login;
     var DataUrl = Root.DataUrl;
     var Toast = Root.Widget.Toast;
     ns.View = function(ctrl) {
-        Frame.TemplateView.call(this,'Root/Fyp/Welcome/Login/template.html' , ctrl);
+        Frame.TemplateView.call(this,'Root/COMP2021/Welcome/Login/template.html' , ctrl);
 
         this.dataUrl = new DataUrl();
         this.applyTemplate();
@@ -3091,18 +3528,16 @@ ns.View.css = {
     ns.View.prototype.onload = function() {
         var that = this;
         var ctrl = this._ctrl;
-        this.eles.usernameInput.addEventListener('keypress', function(e) {
+        this.eles.passwordInput.addEventListener('keypress', function(e) {
             if(e.which == 13) {
-                ctrl.setUsername(this.value);
-                ctrl.login();
+                that._login();
             }
 
         });
 
 
         this.eles.btnLogin.addEventListener('click', function(e) {
-            ctrl.setUsername(usernameInput.value);
-            ctrl.login();
+            that._login();
         });
 
         this.eles.fileInput.addEventListener('change', function(e) {
@@ -3123,6 +3558,11 @@ ns.View.css = {
         };
         this.dataUrl.addObserver(observer);
     };
+    ns.View.prototype._login = function() {
+        var username = this.eles.usernameInput.value;
+        var password = this.eles.passwordInput.value;
+        this._ctrl.login(username, password);
+    };
     ns.View.prototype.update = function(state) {
         if(this.isTemplateLoading) return;
         this.eles.btnLogin.classList.remove('disabled');
@@ -3134,932 +3574,118 @@ ns.View.css = {
         case ns.state.LOGGING_IN:
             this.eles.btnLogin.classList.add('disabled');
             this.eles.btnLogin.html("Signing in...");
-        }
-    }
-})();
-
-(function() {
-    var ns = Root;
-    /**
-     *
-     * @constructor Root.TranslateGame
-     * @arguments Frame.Routable
-     */
-    ns.TranslateGame = function() {
-        Frame.Routable.call(this);
-        this.routeKey = 'TranslateGame';
-        this.bindRoute('WaitingForPlayers', function() {
-            return new ns.TranslateGame.WaitingForPlayers();
-        });
-        this.bindRoute('Welcome', function() {
-            return new ns.TranslateGame.Welcome();
-        });
-        this.bindRoute('GameMain', function() {
-            return new ns.TranslateGame.GameMain();
-        });
-        this.bindRoute("Info",function() {
-            return new ns.TranslateGame.Info();
-        });
-        this.bindRoute("ArchiveExplorer",function() {
-            return new ns.TranslateGame.ArchiveExplorer();
-        });
-        this.bindRoute(/.*/, function() {
-            return new ns.TranslateGame.TitleScreen();
-        });
-    };
-    ns.TranslateGame.extend(Frame.Routable);
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    ns.Api = function() {
-
-    };
-
-    if(location.port == 8080) {
-        ns.Api.SERVER = "";
-    }
-    else {
-        ns.Api.SERVER = "http://localhost:8080";
-    }
-
-    ns.Api.request = function(path, data, callback, onerror) {
-        if(typeof(data) === 'function') {
-            onerror = callback;
-            callback = data;
-            data = {};
-        }
-        if(!onerror) onerror = function(){};
-        Util.jsonp(ns.Api.SERVER + path, data, function(r) {
-            r = ns.Api.returnStrToJson(r);
-            if(!r) {
-                console.error("api request failed");
-                onerror(0);
-                return;
-            }
-            if(!ns.Api.rtnCodeGlobalCheck(r.code)) {
-                onerror(r.code);
-                return;
-            }
-            Root.TranslateGame.Api.Notification.getInstance().start();
-            callback(r.value, r.code, r.value);
-
-        }, function() {
-            var Toast = Root.Widget.Toast;
-            frame.root.toast("Server unreachable.", Toast.type.ERROR);
-            onerror(0);
-        });
-    };
-    ns.Api.request.callback = function(value, rtnCode, rtnValue){};
-    ns.Api.returnStrToJson = function(str) {
-        var rtn;
-        if(typeof(str) === 'string') {
-            try {
-                rtn = eval("(" + str + ")");
-            }
-            catch(e) {
-                return false;
-            }
-        }
-        else {
-            rtn = str;
-        }
-
-        if(typeof(rtn) !== 'object') return false;
-        if(typeof(rtn.code) !== 'number') return false;
-        if(typeof(rtn.msg) !== 'string') return false;
-        if(!rtn.hasOwnProperty('value')) return false;
-        return rtn;
-    };
-    ns.Api.rtnCodeGlobalCheck = function(rtnCode) {
-        switch(rtnCode) {
-        case 400:
-            console.error("api request failed");
-            return true;
-        case 401:
-            Root.TranslateGame.Api.Notification.getInstance().stop();
-            location.hash = "#TranslateGame/Welcome";
-            return false;
-        }
-        return true;
-    }
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Api;
-    var Api = ns;
-    ns.Notification = function() {
-        Util.Evtable.call(this);
-        var event = ns.Notification.event;
-        this.bind(event.GAME_START,function() {
-            location.hash = "#TranslateGame/GameMain";
-        });
-        this.bind(event.GAME_QUIT, function() {
-            location.hash = "#TranslateGame/TitleScreen";
-        });
-        this.bind(event.GAME_PROGRESSED, function() {
-            var gameMain = Frame.Routable.getInstance(Root.TranslateGame.GameMain);
-            if(gameMain) gameMain.requestRefresh();
-        });
-        this.isNotificationSent = false;
-        this.loopTimeoutId = 0;
-        this.isActive = false;
-    };
-    ns.Notification.extend(Util.Evtable);
-    ns.Notification.event = {
-        GAME_START:"GAME_START",
-        GAME_QUIT:"GAME_QUIT",
-        GAME_PROGRESSED:"GAME_PROGRESSED"
-    };
-    ns.Notification.REQUEST_INTERVAL = "2000";
-    ns.Notification.instance = null;
-    ns.Notification.getInstance = function() {
-        if(!ns.Notification.instance) {
-            ns.Notification.instance = new ns.Notification();
-        }
-        return ns.Notification.instance;
-    };
-    ns.Notification.prototype.start = function() {
-        if(this.isActive) return;
-        this.isActive = true;
-        this.isNotificationSent = false;
-        var that = this;
-        var nextLoop = function(interval) {
-            that.loopTimeoutId = setTimeout(function() {
-                looper();
-            },interval);
-        };
-        var looper = function() {
-            if(!that.isActive) return;
-            if(that.isNotificationSent) return;
-            that.isNotificationSent = true;
-            Api.request("/notification/next",{},function(value, rtnCode) {
-                that.isNotificationSent = false;
-                for(var i=0;i<value.length;i++) {
-                    var msg = value[i];
-                    that.trigger(msg);
-                }
-                nextLoop(ns.Notification.REQUEST_INTERVAL);
-            });
-        };
-        nextLoop();
-    };
-    ns.Notification.prototype.stop = function() {
-        this.isActive = false;
-        clearTimeout(this.loopTimeoutId);
-    };
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    var Api = ns.Api;
-    ns.TitleScreen = function() {
-        Frame.Routable.call(this);
-        this.routeKey = "TitleScreen";
-        this.bindRoute('WaitingForPlayers',function() {
-            return new ns.WaitingForPlayers();
-        });
-        this.info = new Root.TranslateGame.Info();
-        this.info.requestRefresh();
-    };
-    ns.TitleScreen.extend(Frame.Routable);
-    ns.TitleScreen.prototype.requestLogout = function() {
-        Api.request("/auth/logout",function() {
-            location.hash = "#TranslateGame/Welcome";
-        });
-    }
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.TitleScreen;
-    var WaitingForPlayers = Root.TranslateGame.WaitingForPlayers;
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, "Root/TranslateGame/TitleScreen/template.html", ctrl);
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.onload = function() {
-        var infoView = Frame.createDefaultView(this._ctrl.info);
-        this.eles.infoWrap.appendChild(infoView.dom);
-
-        var ctrl = this._ctrl;
-        this.eles.btnLogout.onclick = function() {
-            ctrl.requestLogout();
-        }
-    };
-    ns.View.prototype.update = function(state) {
-        if(this.isTemplateLoading) return;
-        switch(state) {
-        case Frame.Routable.state.ROUTE_CHANGED:
-            if(this._ctrl.getRouteChild()) {
-                var view = Frame.createDefaultView(this._ctrl.getRouteChild());
-                this.eles.childWrap.appendChild(view.dom);
-                this.eles.controls.classList.add('hide');
-            }
-            else {
-                this.eles.childWrap.innerHTML = '';
-                this.eles.controls.classList.remove('hide');
-            }
-        }
-    }
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    var Api = Root.TranslateGame.Api;
-    ns.Info = function() {
-        Frame.Routable.call(this);
-        this.username = "";
-        this.score = 0;
-        this.activeGame = {
-            role:0,
-            state:0
-        };
-
-        this.notifyObservers(ns.Info.INIT);
-    };
-    ns.Info.extend(Frame.Routable);
-    ns.Info.state = {
-        INIT:Util.uniqueInt(),
-        REFRESHED:Util.uniqueInt(),
-    };
-    ns.Info.prototype.requestRefresh = function() {
-        var that = this;
-        Api.request("/info/get",{},function(value) {
-            that._readServerJson(value);
-        });
-    };
-    ns.Info.prototype._readServerJson = function(json) {
-        this.username = json.userId;
-        this.score = json.score;
-        this.activeGame = json.activeGame;
-        this.notifyObservers(ns.Info.state.REFRESHED);
-    }
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Info;
-
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this,"Root/TranslateGame/Info/template.html",ctrl);
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.update = function(state) {
-        var ctrl = this._ctrl;
-        if(this.isTemplateLoading) return;
-        this.dom.classList.remove('hide');
-        switch(state) {
-        case ns.state.INIT:
-            this.dom.classList.add('hide');
-            break;
-        case ns.state.REFRESHED:
-            this.eles.username.html(ctrl.username);
-            this.eles.score.html(ctrl.score);
-            if(ctrl.activeGame) {
-                this.eles.gamePlayWrap.classList.remove('hide');
-                this.eles.role.html(ns.View.getRoleAsString(ctrl.activeGame.role));
-            }
-            else {
-                this.eles.gamePlayWrap.classList.add('hide');
-            }
-        }
-    };
-    ns.View.getRoleAsString = function(role) {
-        var GameMain = Root.TranslateGame.GameMain;
-        switch(role) {
-        case GameMain.role.CHALLENGER:
-            return 'challenger';
-        case GameMain.role.TRANSLATOR:
-            return 'translator';
-        case GameMain.role.RESPONDER_M:
-        case GameMain.role.RESPONDER_H:
-            return 'responder';
-        default :
-            return 'unknown';
-        }
-    };
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    ns.Welcome = function() {
-        Frame.Routable.call(this);
-        this.routeKey = 'Welcome';
-        this.login = new ns.Welcome.Login();
-
-        // handle events
-        this.login.bind(ns.Welcome.Login.event.SUCCESS, function() {
-
-            location.hash = '#TranslateGame/TitleScreen';
-        });
-
-    };
-    ns.Welcome.extend(Frame.Routable);
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Welcome;
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, 'Root/TranslateGame/Welcome/template.html', ctrl);
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.onload = function() {
-        var loginView = Frame.createDefaultView(this._ctrl.login);
-        this.eles.loginWrap.appendChild(loginView.dom);
-    }
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Welcome;
-    var Api = Root.TranslateGame.Api;
-    var Toast = Root.Widget.Toast;
-    ns.Login = function() {
-        Frame.Routable.call(this);
-        this.routeKey = 'Login';
-
-        this.username = '';
-        this.profileImg = ns.Login.defaultProfileImg;
-        this.errorMsg = '';
-        this.setChanged(ns.Login.state.NORMAL);
-
-    };
-    ns.Login.extend(Frame.Routable);
-    ns.Login.event = {
-        SUCCESS: Util.uniqueInt(),
-        CLOSE: Util.uniqueInt()
-    };
-    ns.Login.state = {
-        NORMAL: Util.uniqueInt(),
-        LOGGING_IN:Util.uniqueInt(),
-        SUCCEED: Util.uniqueInt(),
-        FAILED: Util.uniqueInt()
-    };
-    ns.Login.prototype.setUsername = function(username) {
-        this.username = username;
-        this.setChanged(ns.Login.state.NORMAL);
-        this.notifyObservers();
-    };
-    ns.Login.prototype.setProfileImg = function(dataUrl) {
-        this.profileImg = dataUrl;
-        this.notifyObservers(ns.Login.state.NORMAL);
-    };
-    ns.Login.prototype.login = function() {
-        this.notifyObservers(ns.Login.state.LOGGING_IN);
-        var that = this;
-
-        Api.request("/auth/login",{userId:this.username},function(value, rtnCode) {
-            switch(rtnCode) {
-            case 200:
-                that.notifyObservers(ns.Login.state.SUCCEED);
-                that.trigger(ns.Login.event.SUCCESS);
-                break;
-            case 201:
-                that.errorMsg = "user already exists";
-                that.notifyObservers(ns.Login.state.FAILED);
-                break;
-            default:
-                that.errorMsg = "login failed";
-                that.notifyObservers(ns.Login.state.FAILED);
-                break;
-            }
-
-        });
-
-    };
-    ns.Login.prototype.close = function() {
-        this.trigger(ns.Login.event.CLOSE);
-    };
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Welcome.Login;
-    var DataUrl = Root.DataUrl;
-    var Toast = Root.Widget.Toast;
-    ns.View = function(ctrl) {
-        Frame.View.call(this, ctrl);
-        this.img = null;
-        this.fileInput = null;
-        this.btnLogin = null;
-        this.dataUrl = new DataUrl();
-        this.dom = this.createElement('.wrap');
-        {
-
-            var label = this.createElement(this.dom, 'label');
-            {
-                this.img = this.createElement(label, 'img.profileImg');
-                this.fileInput = this.createElement(label, 'input[type=file]');
-            }
-
-            var label = this.createElement(this.dom, '.input-group');
-            {
-
-                var usernameInput = this.createElement(label, 'input[type=text].form-control');
-                {
-                    usernameInput.placeholder = 'username';
-                }
-                var span = this.createElement(label, 'span.input-group-btn');
-                {
-                    this.btnLogin = this.createElement(span, 'button.btn.btn-default', 'login');
-                }
-
-            }
-        }
-
-        // bind events
-        var that = this;
-        usernameInput.addEventListener('keypress', function(e) {
-            if(e.which == 13) {
-                ctrl.setUsername(this.value);
-                ctrl.login();
-            }
-
-        });
-
-
-        this.btnLogin.addEventListener('click', function(e) {
-            ctrl.setUsername(usernameInput.value);
-            ctrl.login();
-        });
-
-        this.fileInput.addEventListener('change', function(e) {
-            if(this.files.length<=0) return;
-            that.dataUrl.readFile(this.files[0]);
-        });
-
-        var observer = new Util.Observer(this.dataUrl);
-        observer.update = function(state) {
-            switch(state) {
-            case DataUrl.state.SUCCEED:
-                ctrl.setProfileImg(that.dataUrl.dataUrl);
-                break;
-            case DataUrl.state.BROWSER_NOT_SUPPORTED:
-                frame.root.toast("File api is not supported", Toast.type.ERROR, Toast.duration.PERM);
-                break;
-            }
-        };
-        this.dataUrl.addObserver(observer);
-    };
-    ns.View.extend(Frame.View);
-    ns.View.css = {
-        '.wrap': {
-            width:'300px'
-        },
-        'input[type=file]': {
-            position:'absolute',
-            visibility:'hidden'
-        },
-        '.profileImg': {
-            'border-radius':'50%',
-            height:'128px',
-            margin:'10px',
-        }
-    };
-    ns.View.prototype.update = function(state) {
-        this.btnLogin.classList.remove('disabled');
-        this.btnLogin.html("Sign in");
-        switch(state) {
-        case ns.state.NORMAL:
-            this.img.src = this._ctrl.profileImg;
-            break;
-        case ns.state.LOGGING_IN:
-            this.btnLogin.classList.add('disabled');
-            this.btnLogin.html("Signing in...");
             break;
         case ns.state.FAILED:
-            frame.root.toast(this._ctrl.errorMsg, Toast.type.ERROR, Toast.duration.SHORT);
+            frame.root.toast("login failed", Toast.type.ERROR);
             break;
         }
     }
 })();
 
-Root.TranslateGame.Welcome.Login.defaultProfileImg = 'data:image/png;base64,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';
-
 (function() {
-    var ns = Root.TranslateGame;
-    var Api = Root.TranslateGame.Api;
-    /**
-     *
-     * @constructor Root.TranslateGame
-     * @arguments Frame.Routable
-     */
-    ns.WaitingForPlayers = function() {
+    var ns = Root.COMP2021;
+    var Api = ns.Api;
+    ns.TagEditor = function(audioId) {
         Frame.Routable.call(this);
-        this.routeKey = 'WaitingForPlayers';
-        this._requestJoin();
+        this.audioId = audioId;
+        this.aTag = [];
+        this.aAllTag = [];
+        this._initLoad();
     };
-    ns.WaitingForPlayers.extend(Frame.Routable);
-    ns.WaitingForPlayers.state = {
-        MATCHING:Util.uniqueInt(),
-        QUITING:Util.uniqueInt(),
-        ERROR:Util.uniqueInt(),
+    ns.TagEditor.extend(Frame.Routable);
+    ns.TagEditor.state = {
+        REFRESHED: Util.uniqueInt(),
     };
-    ns.WaitingForPlayers.event = {
-        QUIT:Util.uniqueInt(),
+    ns.TagEditor.event = {
+        EDIT_SUCCESS: Util.uniqueInt(),
+        DONE: Util.uniqueInt(),
     };
-    ns.WaitingForPlayers.prototype._requestJoin = function() {
-        this.notifyObservers(ns.WaitingForPlayers.state.MATCHING);
-        Api.request("/waiting/matchGame",{action:"join"},function(r) {
-            // nothing to do.
+    ns.TagEditor.prototype._initLoad = function() {
+        var that = this;
+        var r1 = Api.request("/tag/listTag.php",{audioId:this.audioId}, function(value) {
+            // update aActiveAudioTag
+            that.aTag = value;
+        });
+        var r2 = Api.request("/tag/allTag.php", function(value) {
+            that.aAllTag = value;
+        });
+        Api.waitFor([r1,r2], function() {
+            that.notifyObservers(ns.TagEditor.state.REFRESHED);
         });
     };
-    ns.WaitingForPlayers.prototype.requestQuit = function() {
-        this.notifyObservers(ns.WaitingForPlayers.state.QUITING);
+    ns.TagEditor.prototype.close = function() {
+        this.trigger(ns.TagEditor.event.DONE);
+    };
+    ns.TagEditor.prototype.requestCommit = function(aTag) {
+        this.aTag = aTag;
         var that = this;
-        Api.request("/waiting/matchGame",{action:"quit"},function(r) {
-            that.trigger(ns.WaitingForPlayers.event.QUIT);
-            location.hash = "TranslateGame/TitleScreen";
+        Api.request("/tag/setTag.php", {audioId:this.audioId, aTag:this.aTag}, function() {
+            that.trigger(ns.TagEditor.event.EDIT_SUCCESS);
+            that.trigger(ns.TagEditor.event.DONE);
         });
     }
+
 })();
 
 (function() {
-    var ns = Root.TranslateGame.WaitingForPlayers;
-    var Toast = Root.Widget.Toast;
+    var ns = Root.COMP2021.TagEditor;
     ns.View = function(ctrl) {
-
-        Frame.TemplateView.call(this, 'Root/TranslateGame/WaitingForPlayers/template.html', ctrl);
+        Frame.TemplateView.call(this, "Root/COMP2021/TagEditor/template.html", ctrl);
+        this.arrayInputable = null;
         this.applyTemplate();
     };
     ns.View.extend(Frame.TemplateView);
     ns.View.prototype.onload = function() {
         var ctrl = this._ctrl;
-        this.eles.btnQuit.onclick = function() {
-            ctrl.requestQuit();
+        var that = this;
+        this.eles.btnSubmit.onclick = function() {
+            ctrl.requestCommit(that.arrayInputable.getValue());
         };
+        this.eles.btnCancel.onclick = function() {
+            ctrl.close();
+        };
+        if(this._ctrl.getObservableState() !== ns.state.REFRESHED) return;
+        this._displayTag();
     };
     ns.View.prototype.update = function(state) {
         if(this.isTemplateLoading) return;
-        this.eles.btnQuit.classList.remove('disabled');
-        switch(state) {
-        case ns.state.MATCHING:
-            break;
-        case ns.state.QUITING:
-            this.eles.btnQuit.classList.add('disabled');
-            break;
-        case ns.state.ERROR:
-            frame.root.toast("An error occurred", Toast.type.ERROR);
-            break;
-        }
-    }
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    var Api = Root.TranslateGame.Api;
-    var Info = Root.TranslateGame.Info;
-    /**
-     *
-     * @constructor Root.TranslateGame.GameMain
-     * @arguments Frame.Routable
-     */
-    ns.GameMain = function() {
-        Frame.Routable.call(this);
-        this.info = new Info();
-        this.role = null;
-        this.question = "";
-        this.translation = "";
-        this.response0 = "";
-        this.response1 = "";
-        this.timeLimit = 0;
-        this.stateStartTime = 0;
-        this.notifyObservers(ns.GameMain.LOADING);
-        this.requestRefresh();
-    };
-    ns.GameMain.extend(Frame.Routable);
-    ns.GameMain.state = {
-        LOADING:Util.uniqueInt(),
-        CHALLENGING:8,
-        TRANSLATING:9,
-        RESPONDING:10,
-        DECIDING:11,
-        FINISHED:12,
-    };
-    ns.GameMain.role = {
-        CHALLENGER:2,
-        TRANSLATOR:3,
-        RESPONDER_H:4,
-        RESPONDER_M:5,
-    };
-    ns.GameMain.HUMAN = 7;
-    ns.GameMain.MACHINE = 6;
-    ns.GameMain.event = {
-        ACTION_ACCEPTED:Util.uniqueInt()
-    };
-
-    ns.GameMain.prototype.submitQuestion = function(value) {
-        var that = this;
-        Api.request("/game/act",{action:"SET_QUESTION",value:value},function() {
-            that.trigger(ns.GameMain.event.ACTION_ACCEPTED);
-        });
-    };
-    ns.GameMain.prototype.submitTranslation = function(value) {
-        var that = this;
-        Api.request("/game/act",{action:"SET_TRANSLATION",value:value},function() {
-            that.trigger(ns.GameMain.event.ACTION_ACCEPTED);
-        });
-    };
-    ns.GameMain.prototype.submitResponse = function(value) {
-        var that = this;
-        Api.request("/game/act",{action:"SET_RESPONSE",value:value},function() {
-            that.trigger(ns.GameMain.event.ACTION_ACCEPTED);
-        });
-    };
-    ns.GameMain.prototype.submitDecision = function(value) {
-        var that = this;
-        Api.request("/game/act",{action:"SET_DECISION",value:value},function() {
-            that.trigger(ns.GameMain.event.ACTION_ACCEPTED);
-        });
-    };
-    ns.GameMain.prototype.getRole = function() {
-        if(this.info.activeGame) {
-            return this.info.activeGame.role;
-        }
-        else {
-            return null;
-        }
-    };
-    ns.GameMain.prototype.requestRefresh = function() {
-
-        this.info.requestRefresh();
-        var that = this;
-        Api.request("/game/sense", {
-            question:"QUESTION", translation:"TRANSLATION", response0:"RESPONSE_0", response1:"RESPONSE_1", role:"ROLE", state:"STATE", timeLimit: "TIME_REMAINING"
-        }, function(r) {
-            that.question = r.question;
-            that.translation = r.translation;
-            that.response0 = r.response0;
-            that.response1 = r.response1;
-            that.role = parseInt(r.role);
-            that.timeLimit = parseInt(r.timeLimit);
-            that.stateStartTime = new Date().getTime();
-
-            that.notifyObservers(parseInt(r.state));
-        });
-    };
-
-    ns.GameMain.prototype.shouldParticipate = function() {
-        switch(this.getObservableState()) {
-        case ns.GameMain.state.CHALLENGING:
-            return this.getRole() === ns.GameMain.role.CHALLENGER;
-        case ns.GameMain.state.TRANSLATING:
-            return this.getRole() === ns.GameMain.role.TRANSLATOR;
-        case ns.GameMain.state.RESPONDING:
-            return this.getRole() === ns.GameMain.role.RESPONDER_H || this.getRole() === ns.GameMain.role.RESPONDER_M;
-        case ns.GameMain.state.DECIDING:
-            return this.getRole() === ns.GameMain.role.CHALLENGER;
-        }
-    };
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame.GameMain;
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, 'Root/TranslateGame/GameMain/template.html', ctrl);
-
-        ctrl.bind(ns.event.ACTION_ACCEPTED,function() {
-            frame.root.toast("Action submitted");
-        });
-        this._isTimeRemainingAnimationPlaying = false;
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.onload = function() {
-        var infoView = Frame.createDefaultView(this._ctrl.info);
-        var eles = this.eles;
-        eles.infoWrap.appendChild(infoView.dom);
-        var that = this;
-        eles.questionSubmit.onclick = function() {
-            that._ctrl.submitQuestion(eles.questionInput.value);
-        };
-        eles.translateSubmit.onclick = function() {
-            that._ctrl.submitTranslation(eles.translateInput.value);
-        };
-        eles.responseSubmit.onclick = function() {
-            that._ctrl.submitResponse(eles.responseInput.value);
-        };
-        eles.decideSubmit.onclick = function() {
-            var val = that.querySelector("input#selection0:checked")?"0":"1";
-            that._ctrl.submitDecision(val);
-        };
-
-    };
-    ns.View.prototype.update = function(state) {
-        if(this.isTemplateLoading) return;
-
-        var ctrl = this._ctrl;
-
-        // clear all active and waiting
-        var aSection = this.querySelectorAll('section');
-        for(var i=0; i<aSection.length; i++) {
-            aSection[i].classList.remove('active');
-            aSection[i].classList.remove('waiting');
-        }
-
-        // mark active and waiting properly
-        var activeSection = null;
-        switch(state) {
-        case ns.state.LOADING:
-            return;
-        case ns.state.CHALLENGING:
-            activeSection = this.eles.challengingSection;
-            break;
-        case ns.state.TRANSLATING:
-            activeSection = this.eles.translatingSection;
-            break;
-        case ns.state.RESPONDING:
-            activeSection = this.eles.respondingSection;
-            break;
-        case ns.state.DECIDING:
-            activeSection = this.eles.decidingSection;
-            break;
-        }
-        if(activeSection)
-        {
-            activeSection.classList.add('active');
-            if(!this._ctrl.shouldParticipate()) activeSection.classList.add('waiting');
-        }
-        if(ctrl.timeLimit) {
-            this._startTimeRemainingAnimation();
-
-        }
-
-        // show all observable strings
-        this.eles.questionDisplay.html(ctrl.question);
-        this.eles.translationDisplay.html(ctrl.translation);
-        this.eles.response0Display.html(ctrl.response0);
-        this.eles.response1Display.html(ctrl.response1);
-
-
-    };
-    ns.View.prototype._startTimeRemainingAnimation = function() {
-        if(this._isTimeRemainingAnimationPlaying) return;
-        this._isTimeRemainingAnimationPlaying = true;
-        var that = this;
-        var looper = function() {
-            var timeRemaining = that._ctrl.timeLimit + that._ctrl.stateStartTime - new Date().getTime() ;
-            if(timeRemaining < 0 ) {
-                that._isTimeRemainingAnimationPlaying = false;
-                return;
-            }
-            var perc = (timeRemaining / that._ctrl.timeLimit) * 100 + '%';
-            that.eles.timeRemaining.style.width = perc;
-            requestAnimationFrame(looper);
-        };
-        requestAnimationFrame(looper);
-    };
-
-
-
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    ns.Archive = function() {
-        Util.Observable.call(this);
-        this.question = "";
-        this.translationM = '';
-        this.translationH = '';
-        this.responseM = '';
-        this.responseH = '';
-        this.decision = null;
-        this.challenger = '';
-        this.translator = '';
-        this.responderM = '';
-        this.responderH = '';
-    };
-    ns.Archive.extend(Util.Observable);
-    ns.Archive.fromServerJson = function(json) {
-        var rtn = new ns.Archive();
-        rtn.question = json.question;
-        rtn.translationM = json.translationM;
-        rtn.translationH = json.translationH;
-        rtn.responseM = json.responseM;
-        rtn.responseH = json.responseH;
-        rtn.decision = json.decision;
-        rtn.challenger = json.challenger;
-        rtn.translator = json.translator;
-        rtn.responderM = json.responderM;
-        rtn.responderH = json.responderH;
-        return rtn;
-    }
-})();
-
-(function() {
-    var ns = Root.TranslateGame.Archive;
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this,"Root/TranslateGame/Archive/template.html", ctrl);
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.onload = function() {
-        var eles = this.eles;
-        var ctrl = this._ctrl;
-        eles.question.html(ctrl.question);
-        eles.translationM.html(ctrl.translationM);
-        eles.translationH.html(ctrl.translationH);
-        eles.responseM.html(ctrl.responseM);
-        eles.responseH.html(ctrl.responseH);
-        eles.challenger.html(ctrl.challenger);
-        eles.translator.html(ctrl.translator);
-        eles.responderM.html(ctrl.responderM);
-        eles.responderH.html(ctrl.responderH);
-        var GameMain = Root.TranslateGame.GameMain;
-        switch(ctrl.decision) {
-        case GameMain.HUMAN:
-            eles.humanBranch.classList.add('selected');
-            break;
-        case GameMain.MACHINE:
-            eles.machineBranch.classList.add('selected');
-        }
-    };
-})();
-
-(function() {
-    var ns = Root.TranslateGame;
-    var Api = Root.TranslateGame.Api;
-    var Archive = Root.TranslateGame.Archive;
-    ns.ArchiveExplorer = function() {
-        Frame.Routable.call(this);
-        this.aArchive = [];
-        this.requestRefresh();
-        this.selectedIndex = null;
-    };
-    ns.ArchiveExplorer.extend(Frame.Routable);
-    ns.ArchiveExplorer.state = {
-        REFRESHED:Util.uniqueInt(),
-        SELECTION_CHANGE:Util.uniqueInt(),
-    };
-    ns.ArchiveExplorer.prototype.requestRefresh = function() {
-        var that = this;
-        Api.request("/game/listArchive",{},function(aServerArchiveJson) {
-            that.aArchive = [];
-            for(var i=0; i<aServerArchiveJson.length; i++) {
-                var archive = Archive.fromServerJson(aServerArchiveJson[i]);
-                that.aArchive.push(archive);
-            }
-            that.notifyObservers(ns.ArchiveExplorer.state.REFRESHED);
-        });
-    };
-    ns.ArchiveExplorer.prototype.select = function(i) {
-        if(this.selectedIndex === i) return;
-        this.selectedIndex = i;
-        this.notifyObservers(ns.ArchiveExplorer.state.SELECTION_CHANGE);
-
-    };
-    ns.ArchiveExplorer.prototype.getSelectedArchive = function() {
-        return this.aArchive[this.selectedIndex];
-    }
-})();
-
-(function() {
-    var ns = Root.TranslateGame.ArchiveExplorer;
-    ns.View = function(ctrl) {
-        Frame.TemplateView.call(this, "Root/TranslateGame/ArchiveExplorer/template.html", ctrl);
-        this.applyTemplate();
-    };
-    ns.View.extend(Frame.TemplateView);
-    ns.View.prototype.update = function(state) {
-        if(this.isTemplateLoading) return;
-        var that = this;
-        var eles = this.eles;
-        var ctrl = this._ctrl;
-
         switch(state) {
         case ns.state.REFRESHED:
-            eles.archiveTabContainer.innerHTML = '';
-            for(var i=0; i<ctrl.aArchive.length; i++) {
-                var archive = ctrl.aArchive[i];
-                var archiveTab = this.createElement(eles.archiveTabContainer, '.archiveTab', archive.translationH);
-                (function(i, archiveTab) {
-                    archiveTab.onclick = function() {
-                        ctrl.select(i);
-                    }
-                })(i, archiveTab);
-
-            }
-            if(ctrl.aArchive.length>0) ctrl.select(0);
-            break;
-        case ns.state.SELECTION_CHANGE:
-            var aArchiveTab = this.querySelectorAll(".archiveTab");
-            for(var i=0; i<aArchiveTab.length; i++) {
-                aArchiveTab[i].classList.remove('active');
-            }
-            aArchiveTab[ctrl.selectedIndex].classList.add('active');
-            eles.contentWrap.innerHTML = '';
-            var view = ctrl.getSelectedArchive().getDefaultView();
-            eles.contentWrap.appendChild(view.dom);
-            break;
+            this._displayTag();
         }
-    }
+    };
+    ns.View.prototype._displayTag = function() {
+        var ArrayInputable = Root.Widget.Inputable.Array;
+        var aTag = this._ctrl.aTag;
+        var arrayInputable = new ArrayInputable();
+        this.arrayInputable = arrayInputable;
+        for(var i=0; i<aTag.length; i++) {
+            var tag = aTag[i];
+            var select = this._createTagSelect();
+            arrayInputable.pushInput(select);
+            select.setValue(tag);
+        }
+        var view = arrayInputable.getDefaultView();
+        var tagWrap = this.eles.tagWrap;
+        tagWrap.innerHTML = '';
+        tagWrap.appendChild(view.dom);
+
+        var that = this;
+        // push event
+        this.eles.btnPush.onclick = function() {
+            var select = that._createTagSelect();
+            arrayInputable.pushInput(select);
+        };
+    };
+    ns.View.prototype._createTagSelect = function() {
+        var Select = Root.Widget.Inputable.Select;
+        var aAllTag = this._ctrl.aAllTag;
+        var rtn = new Select();
+        for(var i=0; i<aAllTag.length; i++) {
+            rtn.addOption(aAllTag[i]);
+        }
+        return rtn;
+    };
 })();
 
 </script>
@@ -10639,7 +10265,9 @@ body {
   background-color: #333;
   color:#fff;
 }
-
+.btn {
+  vertical-align: top;
+}
 .btn-primary:hover, .btn-primary:focus, .btn-primary:active, .btn-primary.active, .open > .dropdown-toggle.btn-primary {
   color: #ffffff;
   background-color: #4798dc;
@@ -10792,11 +10420,27 @@ input[type=checkbox]:checked {
 label {
   margin-bottom: 0;
 }
+.hide {
+  display: none;
+}
+a {
+  color: hsl(207,67%, 50%);
+}
+a:hover {
+  text-decoration: underline;
+  color: hsl(207, 67%, 50%);
+}
+a:visited {
+  color: hsl(207, 67%, 50%);
+}
+a:focus {
+  color: hsl(207, 67%, 50%);
+}
 
 </style>
 </head>
 <body>
-    <div class='template' href='Root/Fyp/LearnMore/template.html'>
+    <div class='template' href='Root/COMP2021/LearnMore/template.html'>
 <p>We are going to develop a software to highlight the user’s interests when browsing the internet.</p>
 
 <p>We decided to build this software using HTML and Javascript. The reason is quite simple. Since the project is “for the web”, we would like to make it “by the web”.</p>
@@ -10836,15 +10480,218 @@ label {
 
 <p>create a “smart browsing mode”</p>
 <p>when user is browsing the web in smart browsing mode, check the Features for current web page, and apply corresponding Selectors. Highlight the elements that our Selector selects.</p>
-</div><div class='template' href='Root/Fyp/MediaPlayer/template.html'><style>
+</div><div class='template' href='Root/COMP2021/Main/template.html'><style>
+    .audioTabWrap {
+        position: absolute;
+        width: 400px;
+        height: 100%;
+        overflow-y: scroll;
+        overflow-x: hidden;
+        border-right:1px solid hsla(0,0%,100%,0.1);
+    }
+    .rightWrap {
+        margin-left: 400px;
+        height: 100%;
+
+    }
+    .mediaPlayerWrap {
+        height: 50px;
+    }
+    .audioTabHeader {
+        margin: 5px 0;
+        border-bottom: 1px solid hsl(207,67%,70%);
+        color: hsl(207, 67%, 80%);
+        padding: 2px 10px;
+    }
+    .audioTabWrap .audioTab {
+        padding: 3px 10px;
+        border: 1px solid transparent;
+        cursor: default;
+    }
+
+    .audioTabWrap .audioTab:hover {
+        border-color: hsla(0,0%,100%,0.15);
+        background-color: hsla(0,0%,100%,0.05);
+    }
+    .audioTabWrap .audioTab.active {
+        background-color: hsla(0,0%,0%,0.2);
+        pointer-events:none;
+        border-left: 3px solid hsl(207, 67%, 50%);
+    }
+    .audioTab #name {
+        color:hsl(0, 0%, 90%);
+    }
+    .audioTab.active #name {
+        color: hsl(207, 67%, 80%);
+        font-weight: bold;
+    }
+    .audioTab #rating {
+        position: absolute;
+        width:100px;
+        height: 100%;
+    }
+    .star {
+        display: inline-block;
+        float: left;
+        background-image:url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0RERERERCIgZD0ibTI1LDIgNiwxN2gxOGwtMTQsMTEgNSwxNy0xNS0xMC0xNSwxMCA1LTE3LTE0LTExaDE4eiIvPg0KPC9zdmc+DQo=);
+
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
+    }
+    .audioTab .star {
+        width:11px;
+        height: 11px;
+    }
+    .star.active {
+        background-image: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9IiMyQTg4RDUiIHN0cm9rZT0iI0RERERERCIgZD0ibTI1LDIgNiwxN2gxOGwtMTQsMTEgNSwxNy0xNS0xMC0xNSwxMCA1LTE3LTE0LTExaDE4eiIvPg0KPC9zdmc+DQo=);
+    }
+    .star.active.predicted {
+        background-image: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB3aWR0aD0iNTEiIGhlaWdodD0iNTEiPg0KPHRpdGxlPkZpdmUgUG9pbnRlZCBTdGFyPC90aXRsZT4NCjxwYXRoIGZpbGw9ImhzbCg4Nyw2NyUsNTAlKSIgc3Ryb2tlPSIjREREREREIiBkPSJtMjUsMiA2LDE3aDE4bC0xNCwxMSA1LDE3LTE1LTEwLTE1LDEwIDUtMTctMTQtMTFoMTh6Ii8+DQo8L3N2Zz4NCg==);
+    }
+    .audioTab #url {
+        color:hsl(0, 0%, 60%);
+        margin-left: 60px;
+        font-size: 10px;
+    }
+    .rightWrap #rating {
+        height: 16px;
+    }
+    .rightWrap .star {
+        width:16px;
+        height: 16px;
+        cursor: pointer;
+    }
+    .indent {
+        margin-left: 10px;
+    }
+    section {
+
+        margin: 10px 0;
+        padding: 10px 30px;
+        font-size: 14px;
+        color: hsl(0,0%,80%);
+    }
+    section header {
+        font-size: 18px;
+        transform:translateX(-20px);
+        margin: 5px 0;
+        color:hsl(0,0%,90%);
+    }
+    .ratingValue {
+        margin-left: 3px;
+        color: hsl(207, 67%, 50%);
+    }
+    .ratingValue.predicted {
+        color: hsl(87, 67%, 50%);
+    }
+    .tags {
+        margin-top: 8px;
+        background-color: hsla(0,0%,0%,0.2);
+    }
+    #tagWrap {
+        display: inline-block;
+        margin-right: 5px;
+    }
+    .tagHeader {
+        display: inline;
+        color: hsl(0,0%,20%);
+        background-color: hsl(207, 67%, 50%);
+        padding-left: 10px;
+        font-weight: bold;
+    }
+    .tag {
+        display: inline-block;
+        margin: 0 3px;
+        padding: 0 3px;
+    }
+    .tag:not(:last-of-type)::after {
+        content: " ,";
+
+        font-weight: bold;
+        color:hsl(207, 67%, 70%);
+    }
+    #editorWrap {
+        padding: 5px;
+    }
+
+</style>
+<div class="fill-height relative">
+    <div id="audioTabWrap" class="audioTabWrap">
+
+    </div>
+    <div class="rightWrap relative">
+        <div id="noActiveAudio">No Music Selected</div>
+        <div id="activeAudio">
+            <div class="indent">
+                <header id="name"></header>
+                <div id="rating">
+                    <div class="star active predicted"></div>
+                    <div class="star active"></div>
+                    <div class="star active"></div>
+                    <div class="star"></div>
+                    <div class="star"></div>
+                    <span class="ratingValue"></span>
+                </div>
+
+            </div>
+            <div class="tags hidden">
+                <div id="displayWrap">
+                    <div class="tagHeader">Tags</div>
+                    <div class="tagWrap" id="tagWrap">
+
+                    </div>
+                    <a id="btnEditTag" href="javascript:void(0);">Edit</a>
+                </div>
+                <div id="editorWrap"></div>
+            </div>
+
+
+            <div id="mediaPlayerWrap" class="mediaPlayerWrap">
+
+            </div>
+        </div>
+
+        <section class="hidden">
+            <header>Recommendation</header>
+            <div>Choose an algorithm for recommendation</div>
+            <button id="btnUserBased" class="btn btn-default btn-sm">User-based recommendation</button>
+
+            <button id="btnTagBased" class="btn btn-default btn-sm">Tag-based recommendation</button>
+        </section>
+        <button id="btnItemBased" class="btn btn-default btn-sm">Item-based recommendation</button>
+
+    </div>
+
+</div>
+
+<div class="hide">
+    <header widget="audioTabHeader" class="audioTabHeader"></header>
+    <div widget="audioTab" class="audioTab">
+        <div id="name"></div>
+        <div class="relative">
+            <div id="rating">
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star active"></div>
+                <div class="star"></div>
+                <div class="star"></div>
+
+            </div>
+            <div id="url"></div>
+        </div>
+
+    </div>
+    <div widget="tag" class="tag"></div>
+</div>
+
+</div><div class='template' href='Root/COMP2021/MediaPlayer/template.html'><style>
     #wrap {
         height: 100%;
-        max-width: 500px;
         position: relative;
     }
     #videoWrap {
         height: 100%;
-        background-image: url(Root/Fyp/MediaPlayer/AlbumBackground.png);
         background-size: cover;
     }
     #controls {
@@ -10965,7 +10812,18 @@ label {
     </div>
 </div>
 
-</div><div class='template' href='Root/Fyp/Welcome/template.html'><style>
+</div><div class='template' href='Root/COMP2021/TagEditor/template.html'><style>
+    #tagWrap {
+        margin-bottom: 5px;
+    }
+</style>
+<div id="wrap">
+    <div id="tagWrap"></div>
+    <button id="btnPush" class="btn btn-sm btn-default">Add More</button>
+    <button id="btnCancel" class="btn btn-sm btn-default">Cancel</button>
+    <button id="btnSubmit" class="btn btn-sm btn-primary">OK</button>
+</div>
+</div><div class='template' href='Root/COMP2021/Welcome/template.html'><style>
     #wrap {
         text-align: center;
         padding: 20px;
@@ -10986,7 +10844,7 @@ label {
 
     </div>
 </div>
-</div><div class='template' href='Root/Fyp/Welcome/Login/template.html'><style>
+</div><div class='template' href='Root/COMP2021/Welcome/Login/template.html'><style>
     .wrap {
         width: 300px;
     }
@@ -11432,7 +11290,59 @@ label {
 
     </div>
 </div>
+</div><div class='template' href='Root/Widget/Inputable/Select.html'><style>
+    #optionWrap {
+        display: none;
+    }
+    .wrap.focused #optionWrap {
+        display: block;
+    }
+    #optionWrap {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        border:1px solid hsl(0,0%,40%);
+        background-color: hsl(0,0%,15%);
+        color:hsl(0,0%,90%);
+        z-index: 1;
+        
+
+    }
+    .option {
+        padding: 0 12px;
+    }
+    .option.hover {
+        background-color: hsla(0,0%,100%,0.1);
+        color: hsl(0,0%,100%);
+        cursor: default;
+    }
+</style>
+<div id="wrap" class="wrap relative">
+    <input type="text" id="input" class="form-control">
+    <div id="optionWrap">
+
+    </div>
+</div>
+<div class="hide">
+    <div widget="option" class="option"></div>
+</div>
+</div><div class='template' href='Root/Widget/Inputable/Array/template.html'><style>
+    #listWrap {
+        display: inline-block;
+    }
+    .itemWrap {
+        display: inline-block;
+        width: 200px;
+    }
+</style>
+<div id="wrap">
+    <div id="listWrap">
+
+    </div>
+</div>
+<div class="hide">
+    <div widget="itemWrap" class="itemWrap"></div>
+</div>
 </div>
 </body>
 </html>
-    

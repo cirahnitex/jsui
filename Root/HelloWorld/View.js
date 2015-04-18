@@ -32,6 +32,7 @@
     ns.View.extend(Frame.View);
     ns.View.prototype.updateChild = function() {
         this._childWrap.innerHTML = "";
+        if(!this._ctrl.getRouteChild()) return;
         var view = Frame.createDefaultView(this._ctrl.getRouteChild());
         this._childWrap.appendChild(view.dom);
     };

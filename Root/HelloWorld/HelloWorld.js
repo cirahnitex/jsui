@@ -3,9 +3,11 @@
     ns.HelloWorld = function() {
         Frame.Routable.call(this);
 
-        this.bindRoute(/.*/,function() {
-            return new ns.HelloWorld.HelloChild();
+
+        Util.get("res/WangDing.json", function(gml) {
+             window.g = gml;
         });
+
     };
     ns.HelloWorld.extend(Frame.Routable);
 })();

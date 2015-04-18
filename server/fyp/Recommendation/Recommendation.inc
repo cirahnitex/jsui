@@ -7,7 +7,7 @@ class Recommendation {
 	/**
 	 * @param string $id1
 	 * @param string $id2
-	 * @return string[] ASC ordered-
+	 * @return string[] ASC ordered
 	 */
 	protected function orderId($id1, $id2) {
 		if($id1 < $id2) {
